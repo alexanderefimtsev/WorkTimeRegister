@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/WorkTimeRegister/WorkTimeRegister.csproj" />
+  <Project Path="tests/WorkTimeRegister.Tests/WorkTimeRegister.Tests.csproj" />
+</Solution>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>WorkTimeRegister-Setup</AssemblyName>
+    <RootNamespace>WorkTimeRegister.Installer</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>../../../src/WorkTimeRegister/Assets/AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(InstallerPayload)' != ''">
+    <EmbeddedResource Include="$(InstallerPayload)" LogicalName="WorkTimeRegister.Payload.zip" />
+  </ItemGroup>
+</Project>

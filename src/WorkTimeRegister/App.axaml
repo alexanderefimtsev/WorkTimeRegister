@@ -1,0 +1,25 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="WorkTimeRegister.App"
+             Name="Учёт рабочего времени"
+             RequestedThemeVariant="Default">
+  <TrayIcon.Icons>
+    <TrayIcons>
+      <TrayIcon Icon="avares://WorkTimeRegister/Assets/AppIcon-1024.png"
+                ToolTipText="Учёт рабочего времени"
+                Clicked="TrayIconClicked">
+        <TrayIcon.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="Открыть" Click="OpenMainWindowClicked" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Выйти" Click="ExitApplicationClicked" />
+          </NativeMenu>
+        </TrayIcon.Menu>
+      </TrayIcon>
+    </TrayIcons>
+  </TrayIcon.Icons>
+
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+</Application>

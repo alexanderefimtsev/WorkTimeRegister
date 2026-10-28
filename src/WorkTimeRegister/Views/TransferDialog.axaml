@@ -1,0 +1,91 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="WorkTimeRegister.Views.TransferDialog"
+        x:CompileBindings="False"
+        Title="Изменение времени"
+        Icon="avares://WorkTimeRegister/Assets/AppIcon-1024.png"
+        Width="500" Height="590" MinHeight="330"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" Margin="28" RowSpacing="16">
+    <TextBlock x:Name="DialogTitleText" Text="Изменение времени"
+               FontSize="24" FontWeight="SemiBold" />
+
+    <StackPanel x:Name="OperationPanel" Grid.Row="1" Spacing="8">
+      <TextBlock Text="Действие" FontWeight="SemiBold" />
+      <RadioButton x:Name="TransferOperationButton"
+                   GroupName="Operation"
+                   Content="Перенести между работой и перерывом"
+                   IsChecked="True"
+                   Checked="OperationChanged"
+                   Unchecked="OperationChanged" />
+      <RadioButton x:Name="AddOperationButton"
+                   GroupName="Operation"
+                   Content="Добавить время"
+                   Checked="OperationChanged"
+                   Unchecked="OperationChanged" />
+      <RadioButton x:Name="RemoveOperationButton"
+                   GroupName="Operation"
+                   Content="Убрать время"
+                   Checked="OperationChanged"
+                   Unchecked="OperationChanged" />
+      <RadioButton x:Name="ClearOperationButton"
+                   GroupName="Operation"
+                   Content="Очистить время"
+                   Checked="OperationChanged"
+                   Unchecked="OperationChanged" />
+    </StackPanel>
+
+    <StackPanel Grid.Row="2" Spacing="8">
+      <TextBlock x:Name="LockedTargetText" FontWeight="SemiBold" IsVisible="False" />
+      <StackPanel x:Name="TransferDirectionPanel" Spacing="8">
+        <TextBlock Text="Направление" FontWeight="SemiBold" />
+        <RadioButton x:Name="WorkToBreakButton"
+                   GroupName="TransferDirection"
+                   Content="Работа → Перерыв"
+                   IsChecked="True"
+                   Checked="DirectionChanged"
+                   Unchecked="DirectionChanged" />
+        <RadioButton x:Name="BreakToWorkButton"
+                   GroupName="TransferDirection"
+                   Content="Перерыв → Работа"
+                   Checked="DirectionChanged"
+                   Unchecked="DirectionChanged" />
+      </StackPanel>
+
+      <StackPanel x:Name="CategoryPanel" Spacing="8" IsVisible="False">
+        <TextBlock Text="Категория" FontWeight="SemiBold" />
+        <RadioButton x:Name="WorkCategoryButton"
+                     GroupName="Category"
+                     Content="Работа"
+                     IsChecked="True"
+                     Checked="CategoryChanged"
+                     Unchecked="CategoryChanged" />
+        <RadioButton x:Name="BreakCategoryButton"
+                     GroupName="Category"
+                     Content="Перерыв"
+                     Checked="CategoryChanged"
+                     Unchecked="CategoryChanged" />
+      </StackPanel>
+
+      <TextBlock x:Name="AvailableTimeText" Opacity="0.65" />
+    </StackPanel>
+
+    <StackPanel x:Name="AmountPanel" Grid.Row="3" Spacing="6">
+      <TextBlock Text="Количество времени (ЧЧ:ММ:СС)" FontWeight="SemiBold" />
+      <TextBox x:Name="AmountTextBox" Text="00:15:00" Watermark="00:15:00" />
+    </StackPanel>
+
+    <TextBlock Grid.Row="4" x:Name="ErrorText" MinHeight="20"
+               Foreground="#DC2626" TextWrapping="Wrap" />
+
+    <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right"
+                Spacing="10">
+      <Button Content="Отмена" MinWidth="100" HorizontalContentAlignment="Center"
+              Click="CancelClicked" />
+      <Button x:Name="ApplyButton" Content="Перенести" MinWidth="110"
+              HorizontalContentAlignment="Center"
+              Click="TransferClicked" />
+    </StackPanel>
+  </Grid>
+</Window>

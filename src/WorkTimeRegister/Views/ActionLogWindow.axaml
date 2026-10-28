@@ -1,0 +1,74 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:WorkTimeRegister.ViewModels"
+        x:Class="WorkTimeRegister.Views.ActionLogWindow"
+        x:DataType="vm:LogWindowViewModel"
+        Title="Журнал действий"
+        Icon="avares://WorkTimeRegister/Assets/AppIcon-1024.png"
+        Width="1080" Height="620" MinWidth="900" MinHeight="420"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="24" RowSpacing="16">
+    <TextBlock Text="Журнал действий" FontSize="26" FontWeight="SemiBold" />
+
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12">
+      <StackPanel Spacing="4">
+        <TextBlock Text="С даты" />
+        <DatePicker SelectedDate="{Binding From}" Width="170" />
+      </StackPanel>
+      <StackPanel Spacing="4">
+        <TextBlock Text="По дату" />
+        <DatePicker SelectedDate="{Binding To}" Width="170" />
+      </StackPanel>
+      <Button Content="Применить" Command="{Binding ApplyFilterCommand}"
+              VerticalAlignment="Bottom" />
+      <Button Content="Экспорт JSON" Click="ExportJsonClicked"
+              VerticalAlignment="Bottom" />
+      <Button Content="Импорт JSON" Click="ImportJsonClicked"
+              VerticalAlignment="Bottom" />
+    </StackPanel>
+
+    <StackPanel Grid.Row="2" Spacing="8">
+      <Border IsVisible="{Binding HasError}" Background="#25EF4444"
+              CornerRadius="8" Padding="10">
+        <TextBlock Text="{Binding ErrorMessage}" Foreground="#DC2626" TextWrapping="Wrap" />
+      </Border>
+      <Border IsVisible="{Binding HasStatus}" Background="#2522C55E"
+              CornerRadius="8" Padding="10">
+        <TextBlock Text="{Binding StatusMessage}" Foreground="#16803A" TextWrapping="Wrap" />
+      </Border>
+    </StackPanel>
+
+    <Border Grid.Row="3" BorderBrush="#30708090" BorderThickness="1" CornerRadius="8">
+      <Grid RowDefinitions="Auto,*">
+        <Border Background="#12708090" Margin="1" Padding="10">
+          <Grid ColumnDefinitions="155,2.2*,150,120,120,120" ColumnSpacing="10">
+            <TextBlock Text="Дата" FontWeight="SemiBold" />
+            <TextBlock Grid.Column="1" Text="Действие" FontWeight="SemiBold" />
+            <TextBlock Grid.Column="2" Text="Текущий режим" FontWeight="SemiBold" />
+            <TextBlock Grid.Column="3" Text="Работа сегодня" FontWeight="SemiBold" />
+            <TextBlock Grid.Column="4" Text="Перерыв сегодня" FontWeight="SemiBold" />
+            <TextBlock Grid.Column="5" Text="Текущий период" FontWeight="SemiBold" />
+          </Grid>
+        </Border>
+        <ScrollViewer Grid.Row="1">
+          <ItemsControl ItemsSource="{Binding Entries}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ActionLogRowViewModel">
+                <Border BorderBrush="#18708090" BorderThickness="0,0,0,1" Padding="10">
+                  <Grid ColumnDefinitions="155,2.2*,150,120,120,120" ColumnSpacing="10">
+                    <TextBlock Text="{Binding RegisteredAt}" />
+                    <TextBlock Grid.Column="1" Text="{Binding Action}" TextWrapping="Wrap" />
+                    <TextBlock Grid.Column="2" Text="{Binding CurrentMode}" />
+                    <TextBlock Grid.Column="3" Text="{Binding TotalWork}" />
+                    <TextBlock Grid.Column="4" Text="{Binding TotalBreak}" />
+                    <TextBlock Grid.Column="5" Text="{Binding CurrentPeriod}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
