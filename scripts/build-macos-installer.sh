@@ -47,6 +47,7 @@ dotnet publish "$PROJECT_FILE" \
     --runtime "$RUNTIME" \
     --self-contained true \
     --output "$PUBLISH_DIR" \
+    -p:Version="$APP_VERSION" \
     -p:DebugType=None \
     -p:DebugSymbols=false
 

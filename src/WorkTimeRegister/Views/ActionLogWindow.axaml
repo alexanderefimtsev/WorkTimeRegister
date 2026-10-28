@@ -21,9 +21,9 @@
       </StackPanel>
       <Button Content="Применить" Command="{Binding ApplyFilterCommand}"
               VerticalAlignment="Bottom" />
-      <Button Content="Экспорт JSON" Click="ExportJsonClicked"
+      <Button x:Name="ExportJsonButton" Content="Экспорт JSON" Click="ExportJsonClicked"
               VerticalAlignment="Bottom" />
-      <Button Content="Импорт JSON" Click="ImportJsonClicked"
+      <Button x:Name="ImportJsonButton" Content="Импорт JSON" Click="ImportJsonClicked"
               VerticalAlignment="Bottom" />
     </StackPanel>
 

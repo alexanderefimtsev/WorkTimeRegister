@@ -61,11 +61,14 @@ public sealed class WorkDayMigrationTests
                 clock.GetUtcNow(), transfers, pauses);
             Assert.Equal(TimeSpan.FromMinutes(50), yesterday.TotalWork);
             Assert.Equal(TimeSpan.FromMinutes(55), yesterday.TotalBreak);
-            var today = await new WorkDayService(repository, clock).ExecuteAsync(WorkDayOperation.Initialize);
+            var service = new WorkDayService(repository, clock);
+            Assert.NotNull((await service.ExecuteAsync(WorkDayOperation.Initialize)).Recovery);
+            var today = await service.ExecuteAsync(WorkDayOperation.ResolveRecovery, recovery: RecoveryChoice.Include);
             Assert.True(today.Day!.IsOpen);
             Assert.Equal(TimeEntryKind.Break, today.Summary.ActiveKind);
             Assert.Equal(TimeSpan.FromMinutes(45), today.Summary.TotalBreak);
             Assert.Equal(TimeSpan.FromMinutes(47), today.Summary.CurrentPeriod);
+            Assert.True(today.Summary.IsPaused);
             var log = Assert.Single(await repository.GetActionLogAsync(previousStart, previousStart.AddDays(1)));
             Assert.Equal("Перенос", log.Action);
             Assert.Equal(TimeSpan.FromMinutes(50), log.TotalWork);
@@ -102,7 +105,9 @@ public sealed class WorkDayMigrationTests
             }
             var repository = new SqliteTimeEntryRepository(path);
             await repository.InitializeAsync(clock);
-            var snapshot = await new WorkDayService(repository, clock).ExecuteAsync(WorkDayOperation.Initialize);
+            var service = new WorkDayService(repository, clock);
+            Assert.NotNull((await service.ExecuteAsync(WorkDayOperation.Initialize)).Recovery);
+            var snapshot = await service.ExecuteAsync(WorkDayOperation.ResolveRecovery, recovery: RecoveryChoice.Exclude);
             Assert.True(snapshot.Summary.IsPaused);
             Assert.Equal(TimeSpan.Zero, snapshot.Summary.TotalWork);
             Assert.Equal(TimeSpan.Zero, snapshot.Summary.CurrentPeriod);

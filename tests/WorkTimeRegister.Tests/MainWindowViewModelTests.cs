@@ -20,65 +20,43 @@ public sealed class MainWindowViewModelTests
         {
             await repository.InitializeAsync();
 
-            using (var viewModel = CreateViewModel(repository, timeProvider))
-            {
-                await viewModel.Initialization;
-                Assert.False(viewModel.StartWorkCommand.CanExecute(null));
-                Assert.False(viewModel.StartBreakCommand.CanExecute(null));
-                Assert.False(viewModel.TogglePauseCommand.CanExecute(null));
-                Assert.Equal("Начать рабочий день", viewModel.WorkDayActionText);
-                Assert.True(viewModel.ToggleWorkDayCommand.CanExecute(null));
-                Assert.False(viewModel.ModeSwitchCommand.CanExecute(null));
-            }
-
-            await repository.StartAsync(TimeEntryKind.Work, now.AddHours(-1));
-            using (var viewModel = CreateViewModel(repository, timeProvider))
-            {
-                await WaitForAsync(() => viewModel.ActiveKind == TimeEntryKind.Work);
-                Assert.False(viewModel.StartWorkCommand.CanExecute(null));
-                Assert.True(viewModel.StartBreakCommand.CanExecute(null));
-                Assert.True(viewModel.TogglePauseCommand.CanExecute(null));
-                Assert.Equal("Начать перерыв", viewModel.ModeSwitchActionText);
-                Assert.True(viewModel.ModeSwitchCommand.CanExecute(null));
-            }
-
-            await repository.StopActiveAsync(now.AddMinutes(-30));
-            await repository.StartAsync(TimeEntryKind.Break, now.AddMinutes(-30));
-            using (var viewModel = CreateViewModel(repository, timeProvider))
-            {
-                await WaitForAsync(() => viewModel.ActiveKind == TimeEntryKind.Break);
-                Assert.True(viewModel.StartWorkCommand.CanExecute(null));
-                Assert.False(viewModel.StartBreakCommand.CanExecute(null));
-                Assert.True(viewModel.TogglePauseCommand.CanExecute(null));
-                Assert.Equal("Продолжить работу", viewModel.ModeSwitchActionText);
-                Assert.True(viewModel.ModeSwitchCommand.CanExecute(null));
-            }
-
-            var activeEntry = await repository.GetActiveEntryAsync();
-            await repository.StartPauseAsync(activeEntry!.Id, now.AddMinutes(-10));
-            using (var viewModel = CreateViewModel(repository, timeProvider))
-            {
-                await WaitForAsync(() => viewModel.IsPaused);
-                Assert.False(viewModel.StartWorkCommand.CanExecute(null));
-                Assert.False(viewModel.StartBreakCommand.CanExecute(null));
-                Assert.True(viewModel.TogglePauseCommand.CanExecute(null));
-                Assert.True(viewModel.EndWorkCommand.CanExecute(null));
-                Assert.Equal("Продолжить работу", viewModel.ModeSwitchActionText);
-                Assert.False(viewModel.ModeSwitchCommand.CanExecute(null));
-            }
-
-            await repository.EndPauseAsync(now);
-            await repository.StopActiveAsync(now);
-            using (var viewModel = CreateViewModel(repository, timeProvider))
-            {
-                await viewModel.Initialization;
-                Assert.Equal("Рабочий день завершён", viewModel.CurrentPeriodTitle);
-                Assert.False(viewModel.StartWorkCommand.CanExecute(null));
-                Assert.False(viewModel.StartBreakCommand.CanExecute(null));
-                Assert.False(viewModel.TogglePauseCommand.CanExecute(null));
-                Assert.Equal("Начать рабочий день", viewModel.WorkDayActionText);
-                Assert.False(viewModel.ModeSwitchCommand.CanExecute(null));
-            }
+            using var viewModel = CreateViewModel(repository, timeProvider);
+            await viewModel.Initialization;
+            Assert.False(viewModel.StartWorkCommand.CanExecute(null));
+            Assert.False(viewModel.StartBreakCommand.CanExecute(null));
+            Assert.False(viewModel.TogglePauseCommand.CanExecute(null));
+            Assert.Equal("Начать рабочий день", viewModel.WorkDayActionText);
+            Assert.True(viewModel.ToggleWorkDayCommand.CanExecute(null));
+            Assert.False(viewModel.ModeSwitchCommand.CanExecute(null));
+            await viewModel.ToggleWorkDayAsync();
+            await WaitForAsync(() => viewModel.ActiveKind == TimeEntryKind.Work);
+            Assert.False(viewModel.StartWorkCommand.CanExecute(null));
+            Assert.True(viewModel.StartBreakCommand.CanExecute(null));
+            Assert.True(viewModel.TogglePauseCommand.CanExecute(null));
+            Assert.Equal("Начать перерыв", viewModel.ModeSwitchActionText);
+            Assert.True(viewModel.ModeSwitchCommand.CanExecute(null));
+            viewModel.StartBreakCommand.Execute(null);
+            await WaitForAsync(() => viewModel.ActiveKind == TimeEntryKind.Break);
+            Assert.True(viewModel.StartWorkCommand.CanExecute(null));
+            Assert.False(viewModel.StartBreakCommand.CanExecute(null));
+            Assert.True(viewModel.TogglePauseCommand.CanExecute(null));
+            Assert.Equal("Продолжить работу", viewModel.ModeSwitchActionText);
+            Assert.True(viewModel.ModeSwitchCommand.CanExecute(null));
+            await viewModel.TogglePauseAsync();
+            await WaitForAsync(() => viewModel.IsPaused);
+            Assert.False(viewModel.StartWorkCommand.CanExecute(null));
+            Assert.False(viewModel.StartBreakCommand.CanExecute(null));
+            Assert.True(viewModel.TogglePauseCommand.CanExecute(null));
+            Assert.True(viewModel.EndWorkCommand.CanExecute(null));
+            Assert.Equal("Продолжить работу", viewModel.ModeSwitchActionText);
+            Assert.False(viewModel.ModeSwitchCommand.CanExecute(null));
+            await viewModel.ToggleWorkDayAsync();
+            Assert.Equal("Рабочий день завершён", viewModel.CurrentPeriodTitle);
+            Assert.False(viewModel.StartWorkCommand.CanExecute(null));
+            Assert.False(viewModel.StartBreakCommand.CanExecute(null));
+            Assert.False(viewModel.TogglePauseCommand.CanExecute(null));
+            Assert.Equal("Начать рабочий день", viewModel.WorkDayActionText);
+            Assert.False(viewModel.ModeSwitchCommand.CanExecute(null));
         }
         finally
         {

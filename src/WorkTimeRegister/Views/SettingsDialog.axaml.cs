@@ -13,12 +13,16 @@ public sealed partial class SettingsDialog : Window
         AutoStartCheckBox.IsChecked = settings.AutoStartOnLaunch;
         RestoreCheckBox.IsChecked = settings.RestoreOnLaunch;
         AutoContinueCheckBox.IsChecked = settings.AutoContinueAtMidnight;
+        PauseDuringSleepCheckBox.IsChecked = settings.PauseDuringSleep;
+        ResumeAfterSleepCheckBox.IsChecked = settings.ResumeAfterSleep;
     }
 
     private void SaveClicked(object? sender, RoutedEventArgs e) => Close(new WorkDaySettings(
         AutoStartCheckBox.IsChecked == true,
         RestoreCheckBox.IsChecked == true,
-        AutoContinueCheckBox.IsChecked == true));
+        AutoContinueCheckBox.IsChecked == true,
+        PauseDuringSleepCheckBox.IsChecked == true,
+        ResumeAfterSleepCheckBox.IsChecked == true));
 
     private void CancelClicked(object? sender, RoutedEventArgs e) => Close((WorkDaySettings?)null);
 }

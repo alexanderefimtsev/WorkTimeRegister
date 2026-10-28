@@ -168,8 +168,19 @@ internal static class Program
         var scriptPath = Path.Combine(installationDirectory, "Uninstall.cmd");
         var script = """
             @echo off
-            taskkill /IM WorkTimeRegister.exe /F >nul 2>&1
-            timeout /t 1 /nobreak >nul
+            "%~dp0WorkTimeRegister.exe" --shutdown
+            if errorlevel 1 (
+                echo Не удалось штатно завершить WorkTimeRegister. Сохраните данные и закройте приложение, затем повторите удаление.
+                pause
+                exit /b 1
+            )
+            timeout /t 2 /nobreak >nul
+            tasklist /FI "IMAGENAME eq WorkTimeRegister.exe" /NH | find /I "WorkTimeRegister.exe" >nul
+            if not errorlevel 1 (
+                echo WorkTimeRegister ещё запущен. Удаление отменено, база данных сохранена.
+                pause
+                exit /b 1
+            )
             del /F /Q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\WorkTimeRegister.lnk" >nul 2>&1
             reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\WorkTimeRegister" /F >nul 2>&1
             cd /D "%TEMP%"

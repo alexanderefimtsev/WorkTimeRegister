@@ -20,6 +20,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool isExiting;
     private bool disposed;
     private string? errorMessage;
+    private RecoveryInfo? pendingRecovery;
 
     public MainWindowViewModel(ITimeEntryRepository repository, TimeSummaryCalculator calculator, TimeProvider timeProvider)
     {
@@ -46,13 +47,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string WorkTime => Format(TotalWork);
     public string BreakTime => Format(TotalBreak);
     public string CurrentPeriod => Format(CurrentPeriodValue);
-    public string CurrentPeriodTitle => IsPaused ? "На паузе…" : ActiveKind switch
+    public string CurrentPeriodTitle => pendingRecovery is not null ? "Требуется восстановление" : IsPaused ? "На паузе…" : ActiveKind switch
     {
         TimeEntryKind.Work => "Работаю…",
         TimeEntryKind.Break => "На перерыве…",
         _ => workDay?.StartedAt is null ? "Рабочий день не начат" : "Рабочий день завершён"
     };
-    public string Status => IsPaused ? $"На паузе: {ModeName(ActiveKind!.Value)}" : ActiveKind switch
+    public string Status => pendingRecovery is not null ? "Выберите способ учёта времени после сбоя" : IsPaused ? $"На паузе: {ModeName(ActiveKind!.Value)}" : ActiveKind switch
     {
         TimeEntryKind.Work => "Сейчас идёт работа",
         TimeEntryKind.Break => "Сейчас идёт перерыв",
@@ -68,7 +69,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string? ErrorMessage { get => errorMessage; private set { errorMessage = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasError)); } }
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
     public WorkDaySettings Settings => settings;
-    public bool IsReady => isInitialized && !isExiting && !disposed;
+    public bool IsReady => isInitialized && !isExiting && !disposed && pendingRecovery is null;
+    public bool HasLoaded => isInitialized;
+    public RecoveryInfo? PendingRecovery => pendingRecovery;
     public bool IsWorkDayOpen => workDay?.IsOpen == true;
     private bool CanChangeMode => IsReady && IsWorkDayOpen && !IsPaused;
     public AsyncCommand StartWorkCommand { get; }
@@ -108,6 +111,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task<bool> SaveSettingsAsync(WorkDaySettings value) =>
         await RunActionAsync(WorkDayOperation.SaveSettings, value);
 
+    public async Task<bool> ResolveRecoveryAsync(RecoveryChoice choice, TimeSpan amount = default)
+    {
+        await Initialization;
+        await stateLock.WaitAsync();
+        try
+        {
+            if (pendingRecovery is null || isExiting || disposed)
+                return false;
+            Apply(await workDayService.ExecuteAsync(WorkDayOperation.ResolveRecovery, amount: amount, recovery: choice));
+            ErrorMessage = null;
+            timer.Start();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Не удалось восстановить учёт: {exception.Message}";
+            return false;
+        }
+        finally { stateLock.Release(); }
+    }
+
+    public async Task HandlePowerEventAsync(bool sleeping, DateTimeOffset at)
+    {
+        await Initialization;
+        await stateLock.WaitAsync();
+        try
+        {
+            if (!IsReady)
+                return;
+            Apply(await workDayService.ExecuteAsync(sleeping ? WorkDayOperation.Suspend : WorkDayOperation.Resume, at: at));
+        }
+        catch (Exception exception) { ErrorMessage = $"Не удалось обработать смену режима питания: {exception.Message}"; }
+        finally { stateLock.Release(); }
+    }
+
     public async Task RefreshAsync()
     {
         await Initialization;
@@ -126,6 +164,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return true;
             if (!isInitialized)
                 throw new InvalidOperationException("Данные не загружены. Завершение рабочего дня не подтверждено.");
+            if (pendingRecovery is not null)
+                throw new InvalidOperationException("Сначала завершите восстановление после сбоя.");
             isExiting = true;
             timer.Stop();
             RefreshCommands();
@@ -136,7 +176,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             isExiting = false;
             ErrorMessage = $"Не удалось завершить рабочий день при выходе: {exception.Message}";
-            timer.Start();
+            if (pendingRecovery is null)
+                timer.Start();
             RefreshCommands();
             return false;
         }
@@ -151,7 +192,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var snapshot = await workDayService.ExecuteAsync(WorkDayOperation.Initialize);
             isInitialized = true;
             Apply(snapshot);
-            timer.Start();
+            if (pendingRecovery is null)
+                timer.Start();
         }
         catch (Exception exception)
         {
@@ -208,6 +250,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         currentDate = snapshot.Date;
         currentSummary = snapshot.Summary;
         settings = snapshot.Settings;
+        pendingRecovery = snapshot.Recovery;
         foreach (var property in new[]
                  {
                      nameof(WorkTime), nameof(BreakTime), nameof(CurrentPeriod), nameof(CurrentPeriodTitle), nameof(Status),
@@ -215,7 +258,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                      nameof(ModeSwitchActionText), nameof(TotalWork), nameof(TotalBreak), nameof(CurrentPeriodValue),
                      nameof(ActiveKind), nameof(IsPaused), nameof(IsNotPaused), nameof(IsWorkDayOpen), nameof(Settings),
                      nameof(IsReady), nameof(CanAdjustCurrentPeriod), nameof(CanReduceWork), nameof(CanReduceBreak),
-                     nameof(CanReduceCurrentPeriod)
+                     nameof(CanReduceCurrentPeriod), nameof(PendingRecovery), nameof(HasLoaded)
                  })
             OnPropertyChanged(property);
         RefreshCommands();

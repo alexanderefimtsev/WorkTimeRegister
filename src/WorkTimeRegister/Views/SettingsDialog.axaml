@@ -4,11 +4,12 @@
         x:CompileBindings="False"
         Title="Настройки рабочего дня"
         Icon="avares://WorkTimeRegister/Assets/AppIcon-1024.png"
-        Width="610" SizeToContent="Height" CanResize="False"
+        Width="680" MaxHeight="780" SizeToContent="Height" CanResize="False"
         WindowStartupLocation="CenterOwner">
-  <Grid RowDefinitions="Auto,Auto,Auto" Margin="24" RowSpacing="20">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="24" RowSpacing="20">
     <TextBlock Text="Настройки рабочего дня" FontSize="24" FontWeight="SemiBold" />
-    <StackPanel Grid.Row="1" Spacing="18">
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+    <StackPanel Spacing="18">
       <StackPanel Spacing="4">
         <CheckBox x:Name="AutoStartCheckBox" Content="Начинать рабочий день при запуске программы" />
         <TextBlock Margin="28,0,0,0" TextWrapping="Wrap" Opacity="0.7"
@@ -26,7 +27,19 @@
       </StackPanel>
       <TextBlock TextWrapping="Wrap" Opacity="0.7"
                  Text="Красный крестик скрывает окно и сохраняет учёт. «Выйти» и Cmd+Q завершают рабочий день. Настройки применяются после сохранения; запуск дня проверяется при следующем открытии программы." />
+      <StackPanel Spacing="4">
+        <CheckBox x:Name="PauseDuringSleepCheckBox" Content="Приостанавливать учёт во время сна компьютера" />
+        <TextBlock Margin="28,0,0,0" TextWrapping="Wrap" Opacity="0.7"
+                   Text="Пауза включается перед сном для работы и перерыва. Выключите, если время сна должно учитываться в текущем режиме." />
+      </StackPanel>
+      <StackPanel Spacing="4">
+        <CheckBox x:Name="ResumeAfterSleepCheckBox" Content="Продолжать автоматически после пробуждения"
+                  IsEnabled="{Binding IsChecked, ElementName=PauseDuringSleepCheckBox}" />
+        <TextBlock Margin="28,0,0,0" TextWrapping="Wrap" Opacity="0.7"
+                   Text="Снимать только автоматическую паузу сна. Пауза, установленная вручную, сохраняется. Завершённый день не возобновляется." />
+      </StackPanel>
     </StackPanel>
+    </ScrollViewer>
     <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
       <Button Content="Отмена" MinWidth="100" HorizontalContentAlignment="Center" Click="CancelClicked" />
       <Button Content="Сохранить" MinWidth="110" HorizontalContentAlignment="Center" Click="SaveClicked" />

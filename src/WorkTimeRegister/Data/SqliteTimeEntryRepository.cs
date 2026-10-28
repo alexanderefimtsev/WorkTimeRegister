@@ -13,6 +13,7 @@ public sealed partial class SqliteTimeEntryRepository(string databasePath) : ITi
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
         await using var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync();
+        await ValidateSchemaVersionAsync(connection);
         await BackupBeforeWorkDayMigrationAsync(connection);
         var command = connection.CreateCommand();
         command.CommandText = """
@@ -61,6 +62,7 @@ public sealed partial class SqliteTimeEntryRepository(string databasePath) : ITi
         await EnsureCurrentPeriodAdjustmentColumnAsync(connection);
         await EnsureActionLogIsPausedColumnAsync(connection);
         await MigrateWorkDaysAsync(connection, timeProvider ?? TimeProvider.System);
+        await MigrateReliabilityAsync(connection);
     }
 
     public async Task<IReadOnlyList<TimeEntry>> GetEntriesAsync(DateTimeOffset from, DateTimeOffset to)

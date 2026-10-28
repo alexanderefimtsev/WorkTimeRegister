@@ -26,7 +26,17 @@ public sealed record WorkDay(
 public sealed record WorkDaySettings(
     bool AutoStartOnLaunch = false,
     bool RestoreOnLaunch = false,
-    bool AutoContinueAtMidnight = false);
+    bool AutoContinueAtMidnight = false,
+    bool PauseDuringSleep = true,
+    bool ResumeAfterSleep = false);
+
+public enum RecoveryChoice { Exclude, Include, Custom }
+
+public sealed record RecoveryInfo(DateTimeOffset ConfirmedAt, DateTimeOffset DetectedAt,
+    TimeEntryKind Mode, bool WasPaused, TimeSpan MaximumCountableDuration)
+{
+    public TimeSpan Duration => DetectedAt - ConfirmedAt;
+}
 
 public enum WorkDayOperation
 {
@@ -41,7 +51,10 @@ public enum WorkDayOperation
     Exit,
     SaveSettings,
     AdjustTime,
-    AdjustCurrentPeriod
+    AdjustCurrentPeriod,
+    ResolveRecovery,
+    Suspend,
+    Resume
 }
 
 public sealed record WorkDayRequest(
@@ -51,10 +64,13 @@ public sealed record WorkDayRequest(
     WorkDaySettings? Settings = null,
     TimeAdjustmentOperation Adjustment = TimeAdjustmentOperation.Add,
     TimeEntryKind Category = TimeEntryKind.Work,
-    TimeSpan Amount = default);
+    TimeSpan Amount = default,
+    Guid SessionId = default,
+    RecoveryChoice Recovery = RecoveryChoice.Exclude);
 
 public sealed record WorkDaySnapshot(
     WorkDay? Day,
     DateOnly Date,
     TimeSummary Summary,
-    WorkDaySettings Settings);
+    WorkDaySettings Settings,
+    RecoveryInfo? Recovery = null);

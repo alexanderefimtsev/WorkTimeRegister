@@ -13,12 +13,43 @@ public sealed partial class SqliteTimeEntryRepository
         await using var transaction = connection.BeginTransaction();
         var settings = await ReadSettingsAsync(connection, transaction);
         var openDay = await ReadOpenDayAsync(connection, transaction);
+        var runtime = await ReadRuntimeAsync(connection, transaction);
+        var recovery = await DetectRecoveryAsync(connection, transaction, request, openDay, runtime, settings);
+        DateTimeOffset? recoveryPauseAt = null;
+        if (recovery is not null)
+        {
+            if (request.Operation == WorkDayOperation.ResolveRecovery)
+                recoveryPauseAt = await ApplyRecoveryAsync(connection, transaction, request, openDay!, recovery);
+            else
+            {
+                if (request.Operation is not (WorkDayOperation.Initialize or WorkDayOperation.Refresh))
+                    throw new InvalidOperationException("Сначала выберите, как учитывать время после аварийного завершения.");
+                var frozen = new WorkDaySnapshot(openDay, openDay!.Date,
+                    await ReadSummaryAsync(connection, transaction, openDay, recovery.ConfirmedAt), settings, recovery);
+                await transaction.CommitAsync();
+                return frozen;
+            }
+        }
+        else if (request.Operation == WorkDayOperation.ResolveRecovery)
+            throw new InvalidOperationException("Нет интервала для восстановления.");
+
+        var missedSleep = settings.PauseDuringSleep && runtime.SleepStartedAt is null &&
+                          runtime.LastSeenAt.HasValue && request.Now - runtime.LastSeenAt.Value > TimeSpan.FromMinutes(1) &&
+                          request.Operation == WorkDayOperation.Resume;
+        if (missedSleep && openDay is not null)
+        {
+            var beforeGap = await ReadSummaryAsync(connection, transaction, openDay, runtime.LastSeenAt!.Value);
+            if (!beforeGap.IsPaused)
+                recoveryPauseAt = runtime.LastSeenAt;
+            runtime = runtime with { SleepStartedAt = runtime.LastSeenAt, SleepAutoPaused = !beforeGap.IsPaused };
+        }
         var zone = openDay is null ? request.TimeZone : ResolveTimeZone(openDay.TimeZoneId, request.TimeZone);
         var date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(request.Now, zone).DateTime);
 
         while (openDay is not null && request.Now >= openDay.DayEnd)
         {
             var boundary = openDay.DayEnd;
+            await EnsureRecoveryPauseAsync(connection, transaction, openDay, recoveryPauseAt, boundary);
             var previous = await ReadSummaryAsync(connection, transaction, openDay, boundary);
             await CloseDayAsync(connection, transaction, openDay, boundary, WorkDayCloseReason.Midnight,
                 "Автоматическое завершение рабочего дня", boundary.AddTicks(-1));
@@ -33,6 +64,7 @@ public sealed partial class SqliteTimeEntryRepository
         }
 
         var day = await ReadDayAsync(connection, transaction, date);
+        await EnsureRecoveryPauseAsync(connection, transaction, day, recoveryPauseAt, request.Now);
         switch (request.Operation)
         {
             case WorkDayOperation.Initialize:
@@ -99,15 +131,17 @@ public sealed partial class SqliteTimeEntryRepository
             case WorkDayOperation.SaveSettings:
                 var updated = request.Settings ?? throw new InvalidOperationException("Настройки не указаны.");
                 await ExecuteSqlAsync(connection, transaction,
-                    "UPDATE WorkDaySettings SET AutoStartOnLaunch=$start, RestoreOnLaunch=$restore, AutoContinueAtMidnight=$continue WHERE Id=1;",
+                    "UPDATE WorkDaySettings SET AutoStartOnLaunch=$start, RestoreOnLaunch=$restore, AutoContinueAtMidnight=$continue, PauseDuringSleep=$sleep, ResumeAfterSleep=$resume WHERE Id=1;",
                     ("$start", updated.AutoStartOnLaunch ? 1 : 0),
                     ("$restore", updated.RestoreOnLaunch ? 1 : 0),
-                    ("$continue", updated.AutoContinueAtMidnight ? 1 : 0));
+                    ("$continue", updated.AutoContinueAtMidnight ? 1 : 0),
+                    ("$sleep", updated.PauseDuringSleep ? 1 : 0), ("$resume", updated.ResumeAfterSleep ? 1 : 0));
                 if (settings != updated)
                     await WriteDayLogAsync(connection, transaction, day, request.Now,
                         $"Настройки рабочего дня: начало при запуске — {OnOff(updated.AutoStartOnLaunch)}; " +
                         $"восстановление — {OnOff(updated.RestoreOnLaunch)}; " +
-                        $"продолжение после полуночи — {OnOff(updated.AutoContinueAtMidnight)}", request.Now, date);
+                        $"продолжение после полуночи — {OnOff(updated.AutoContinueAtMidnight)}; " +
+                        $"пауза во сне — {OnOff(updated.PauseDuringSleep)}; продолжение после сна — {OnOff(updated.ResumeAfterSleep)}", request.Now, date);
                 settings = updated;
                 break;
             case WorkDayOperation.AdjustTime:
@@ -131,6 +165,48 @@ public sealed partial class SqliteTimeEntryRepository
                 break;
         }
 
+        if (request.Operation == WorkDayOperation.ResolveRecovery)
+            await WriteDayLogAsync(connection, transaction, day, request.Now,
+                $"Восстановление после сбоя: {recovery!.ConfirmedAt:O} — {recovery.DetectedAt:O}; " +
+                (recovery.WasPaused ? "прежняя пауза сохранена" : request.Recovery switch
+                {
+                    RecoveryChoice.Include => $"учтено {recovery.MaximumCountableDuration} с учётом границы рабочего дня",
+                    RecoveryChoice.Custom => $"с начала интервала учтено {request.Amount}",
+                    _ => "интервал не учтён"
+                }) + "; учёт остаётся на паузе, если день открыт", request.Now, date);
+
+        if (request.Operation == WorkDayOperation.Suspend && runtime.SleepStartedAt is null)
+        {
+            var beforeSleep = await ReadSummaryAsync(connection, transaction, day, request.Now);
+            var autoPaused = day?.IsOpen == true && settings.PauseDuringSleep && !beforeSleep.IsPaused;
+            if (autoPaused)
+                await EnsureRecoveryPauseAsync(connection, transaction, day, request.Now, request.Now);
+            await ExecuteSqlAsync(connection, transaction,
+                "UPDATE ApplicationState SET SleepStartedAt=$at, SleepAutoPaused=$paused WHERE Id=1;",
+                ("$at", Format(request.Now)), ("$paused", autoPaused ? 1 : 0));
+            if (day?.IsOpen == true)
+                await WriteDayLogAsync(connection, transaction, day, request.Now,
+                    autoPaused ? "Автоматическая пауза перед сном" : "Переход компьютера в сон", request.Now);
+        }
+        if ((request.Operation == WorkDayOperation.Resume || missedSleep) && runtime.SleepStartedAt.HasValue)
+        {
+            if (runtime.SleepAutoPaused && settings.ResumeAfterSleep && day?.IsOpen == true)
+            {
+                await ExecuteSqlAsync(connection, transaction,
+                    "UPDATE TimePauses SET EndedAt=$at WHERE EndedAt IS NULL;", ("$at", Format(request.Now)));
+                await ExecuteSqlAsync(connection, transaction,
+                    "UPDATE WorkDays SET WasPaused=0 WHERE Id=$day;", ("$day", day.Id));
+            }
+            await ExecuteSqlAsync(connection, transaction,
+                "UPDATE ApplicationState SET SleepStartedAt=NULL, SleepAutoPaused=0 WHERE Id=1;");
+            await WriteDayLogAsync(connection, transaction, day, request.Now,
+                missedSleep ? "Пропущенный интервал обновлений обработан как сон" : "Компьютер вышел из сна", request.Now, date);
+        }
+        if (request.Operation == WorkDayOperation.Exit)
+            await ExecuteSqlAsync(connection, transaction,
+                "UPDATE ApplicationState SET SleepStartedAt=NULL, SleepAutoPaused=0 WHERE Id=1;");
+
+        await SaveCheckpointAsync(connection, transaction, request, runtime);
         day = await ReadDayAsync(connection, transaction, date);
         var result = new WorkDaySnapshot(day, date,
             await ReadSummaryAsync(connection, transaction, day, request.Now), settings);
@@ -271,10 +347,11 @@ public sealed partial class SqliteTimeEntryRepository
     private static async Task<WorkDaySettings> ReadSettingsAsync(SqliteConnection connection, SqliteTransaction transaction)
     {
         using var command = CreateSql(connection, transaction,
-            "SELECT AutoStartOnLaunch, RestoreOnLaunch, AutoContinueAtMidnight FROM WorkDaySettings WHERE Id=1;");
+            "SELECT AutoStartOnLaunch, RestoreOnLaunch, AutoContinueAtMidnight, PauseDuringSleep, ResumeAfterSleep FROM WorkDaySettings WHERE Id=1;");
         await using var reader = await command.ExecuteReaderAsync();
         await reader.ReadAsync();
-        return new WorkDaySettings(reader.GetInt32(0) != 0, reader.GetInt32(1) != 0, reader.GetInt32(2) != 0);
+        return new WorkDaySettings(reader.GetInt32(0) != 0, reader.GetInt32(1) != 0, reader.GetInt32(2) != 0,
+            reader.GetInt32(3) != 0, reader.GetInt32(4) != 0);
     }
 
     private static async Task<long> ActiveEntryIdAsync(SqliteConnection connection, SqliteTransaction transaction, long dayId) =>

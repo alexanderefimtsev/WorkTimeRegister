@@ -6,12 +6,20 @@ namespace WorkTimeRegister.Services;
 
 public sealed class ActionLogJsonService
 {
+    public const long MaximumImportBytes = 128L * 1024 * 1024;
+    private readonly long maximumImportBytes;
     private const string DocumentFormat = "WorkTimeRegister.ActionLog";
     private const int DocumentVersion = 2;
     private const int MaximumEntryCount = 100_000;
     private const int MaximumActionLength = 1_000;
     private static readonly long MaximumDurationSeconds = TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerSecond;
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
+
+    public ActionLogJsonService(long maximumImportBytes = MaximumImportBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumImportBytes);
+        this.maximumImportBytes = maximumImportBytes;
+    }
 
     public Task ExportAsync(
         Stream stream,
@@ -39,11 +47,14 @@ public sealed class ActionLogJsonService
     {
         ArgumentNullException.ThrowIfNull(stream);
 
+        if (stream.CanSeek && stream.Length - stream.Position > maximumImportBytes)
+            throw new InvalidDataException("JSON-файл превышает допустимый размер для импорта (128 МиБ по умолчанию).");
+        using var limited = new SizeLimitedReadStream(stream, maximumImportBytes);
         ActionLogExportDocument document;
         try
         {
             document = await JsonSerializer.DeserializeAsync<ActionLogExportDocument>(
-                    stream,
+                    limited,
                     SerializerOptions,
                     cancellationToken)
                 ?? throw new InvalidDataException("JSON-файл журнала пуст.");
@@ -97,8 +108,10 @@ public sealed class ActionLogJsonService
         IsWorkDayOpen = record.IsWorkDayOpen
     };
 
-    private static void Validate(ActionLogExportEntry entry)
+    private static void Validate(ActionLogExportEntry? entry)
     {
+        if (entry is null)
+            throw new InvalidDataException("Список журнала содержит пустую запись.");
         if (entry.RegisteredAt == default)
             throw new InvalidDataException("Запись журнала содержит некорректную дату.");
         if (string.IsNullOrWhiteSpace(entry.Action) || entry.Action.Length > MaximumActionLength)

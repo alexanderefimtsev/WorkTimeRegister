@@ -6,6 +6,7 @@
 | --- | --- | --- | --- |
 | 1 | Claude (Opus 5.5) | 28 октября 2026 | Аудит чтением кода, без сборки и тестов |
 | 2 | Codex | 28 октября 2026 | Сверка аудита с кодом, 69 тестов, 13 сценариев на временных базах |
+| 3 | Codex | 28 октября 2026 | Реализация согласованных исправлений, восстановление после сбоя, пауза при сне, двуязычные правила |
 
 Обе сессии проверяли версию 1.5.2, коммит `ef81e09`.
 
@@ -254,3 +255,215 @@ git diff --exit-code
 Начать рекомендую с первого этапа. Он устранит конкретные дефекты, сохранив согласованную логику учёта.
 
 Исправления по результатам аудита пока не внесены. Новый установщик и коммит не создавались.
+
+## Сессия 3: Codex, реализация согласованных исправлений
+
+Дата: 28 октября 2026 года.
+
+Основа: коммит `9d0932a` с предыдущими сессиями анализа.
+
+Подготовленная версия приложения: **1.6.0**, сборка macOS **19**.
+Статус на момент подготовки: локальная реализация и проверки; коммит и отправка в GitHub ожидали подтверждения пользователя.
+
+### Согласованные требования
+
+Пользователь поручил применить первый этап исправлений и отдельно подтвердил расширение:
+«Также восстановление после сбоя и пауза при сне».
+
+Дополнительно согласовано вести анализ и рекомендации в этом файле и подготовить полный
+английский перевод правил. Точное имя существующего файла — `ANALYSIS.md`; переименование
+в `Analysis.md` не выполнялось. Сессии 1 и 2 сохранены без изменения их текста.
+
+### Что реализовано
+
+| Область | Результат |
+| --- | --- |
+| Экспорт JSON | Запись во временный файл в папке назначения, сброс данных на диск, замена выбранного файла только после успеха. Ошибка или отказ операции сохраняют предыдущий файл. |
+| Ошибки файлов | Выбор, открытие, чтение, запись и освобождение файлов включены в обработку ошибок. Импорт и экспорт защищены от повторного одновременного нажатия. |
+| Импорт JSON | Ограничение 128 МиБ проверяется и до чтения, если размер известен, и во время чтения потока. Пустая запись в массиве даёт понятную ошибку. Форматы JSON 1 и 2 сохранены. |
+| Единственный экземпляр | Блокировка отдельного служебного файла и локальное уведомление существующего процесса. Повторный запуск открывает его окно и не создаёт второй таймер. |
+| Ошибка запуска | Окно с путём к базе, причиной, повтором, открытием папки и выходом. Существующая база не заменяется пустой. |
+| Ошибка выхода | Можно повторить сохранение, остаться в приложении или явно выйти без сохранения. |
+| Удаление в Windows | Удалён `taskkill /F`. Команда `--shutdown` запрашивает штатное завершение; при отказе или работающем процессе удаление отменяется. База не удаляется. |
+| Миграция | Перед обновлением непустой базы создаётся `worktime.db.before-reliability-<дата>-<идентификатор>.bak`. Добавлена версия схемы через `PRAGMA user_version=2`. База будущей версии отклоняется до изменения данных. |
+| Восстановление | Контрольные отметки активности, обнаружение незавершённой сессии и диалог выбора неизвестного интервала. |
+| Сон | Подписка на системные уведомления macOS и Windows; автоматическая пауза, настройка продолжения после пробуждения, сохранение ручной паузы. |
+| Правила | В `AGENTS.md` добавлены правила обсуждения в `ANALYSIS.md`. Полный перевод всех правил сохранён в `AGENTS.en.md`. |
+
+### Правила восстановления после сбоя
+
+1. Контрольная отметка сохраняется при операциях пользователя и при обновлении таймера
+   с интервалом не более 15 секунд. Она подтверждает работу программы, а не присутствие человека.
+2. После сбоя итог на экране фиксируется на последней отметке, а неизвестный интервал
+   от неё до запуска ожидает решения пользователя.
+3. Доступны варианты: не учитывать, учесть целиком или указать длительность вручную.
+   При ручном вводе учитывается время **с начала неизвестного интервала**. Для длительности
+   больше суток используется запись `Д.ЧЧ:ММ:СС`.
+4. Ожидание ответа в диалоге исключается. После решения открытый день остаётся на паузе;
+   продолжение выполняется явно. Ранее установленная пауза сохраняется.
+5. Переходы через полночь применяются после решения. Учтённые и исключённые интервалы
+   распределяются по календарным дням, а не целиком записываются в день запуска.
+6. При выключенном продолжении через полночь прежний день закрывается на своей границе;
+   последующие дни автоматически не открываются. В диалоге явно показан максимум до конца
+   этого дня; ручной ввод сверх предела отклоняется, кнопка полного учёта меняет подпись.
+7. Выход без восстановления сохраняет необходимость выбора при следующем запуске.
+8. Изменение периодов, пауз, служебного состояния и запись решения в журнал выполняются
+   в одной транзакции. Ошибка записи журнала откатывает восстановление.
+
+### Правила сна
+
+- `PauseDuringSleep=true` по умолчанию: сон не включается ни в работу, ни в перерыв.
+- `ResumeAfterSleep=false` по умолчанию: после пробуждения нужно нажать «Продолжить».
+- Автоматическое продолжение снимает только паузу, созданную перед сном; ручная пауза сохраняется.
+- При выключенном `PauseDuringSleep` сохранён прежний непрерывный учёт.
+- Завершённый день не открывается при пробуждении.
+- При продолжении через полночь пауза переносится на следующие сутки, сохраняя нулевые
+  итоги за время сна. При выключенном продолжении прежний день закрывается в полночь.
+- Если пришло уведомление о пробуждении без предварительного уведомления о сне и после
+  последней отметки прошло больше минуты, интервал исключается с последней отметки.
+  Это запасной механизм; точный момент сна при пропущенном уведомлении неизвестен.
+
+Для macOS используются уведомления центра `NSWorkspace`, для Windows — `WM_POWERBROADCAST`
+через существующее окно Avalonia. Новые зависимости и новый UI-фреймворк не добавлялись.
+Основания: [Apple: willSleepNotification](https://developer.apple.com/documentation/appkit/nsworkspace/willsleepnotification),
+[Apple: didWakeNotification](https://developer.apple.com/documentation/appkit/nsworkspace/didwakenotification),
+[Microsoft: WM_POWERBROADCAST](https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast).
+
+### Проверки
+
+```sh
+dotnet test WorkTimeRegister.slnx --no-restore -m:1 -nodeReuse:false
+```
+
+Результат: **103 тестовых случая пройдено, 0 ошибок**. По сравнению с исходной версией
+добавлено 34 проверяемых сочетания. Один существующий тест переключения режимов переведён
+на реальные команды одной сессии вместо создания нескольких экземпляров ViewModel без выхода.
+Публичные методы репозитория не удалялись.
+
+Тесты миграции со старой схемы теперь явно подтверждают неизвестный интервал перед проверкой
+итогов: старый незавершённый период больше не продолжается молча. Дополнительно проверено,
+что ручная корректировка времени старого открытого дня учитывается при выборе контрольной
+отметки и не приводит к отрицательному замороженному итогу.
+
+Покрыты работа, перерыв, ручная пауза, завершённые периоды, варианты восстановления,
+ожидание ответа, несколько суток, отсутствие продолжения через полночь, откат транзакции,
+повторный сбой до принятия решения, миграция и сохранение прежнего экспорта.
+
+```sh
+dotnet run --project /private/tmp/worktimeregister-native-qa/NativeQa.csproj -p:NuGetAudit=false --no-launch-profile
+```
+
+Изолированная проверка на временных данных:
+
+- реальный второй процесс не получил блокировку и успешно передал команду активации первому;
+- нативная подписка macOS получила отправленные тестом уведомления `NSWorkspace` о сне и пробуждении;
+- окна настроек, восстановления и ошибки базы отрисованы, проверены изображения и положение кнопок;
+- размеры содержимого: настройки `680×577`, восстановление `660×492`, ошибка базы `640×233`.
+
+Реальный перевод компьютера в сон, пробуждение аппаратным событием и запуск в Windows
+не выполнялись. Логика этих переходов проверена автоматическими сценариями; Windows требует
+отдельной проверки на целевой системе.
+
+```sh
+dotnet run --project /private/tmp/worktimeregister-lifecycle-qa/LifecycleQa.csproj -p:NuGetAudit=false --no-launch-profile -- startup-error
+dotnet run --project /private/tmp/worktimeregister-lifecycle-qa/LifecycleQa.csproj -p:NuGetAudit=false --no-launch-profile -- recovery
+```
+
+Код жизненного цикла `App.axaml.cs` дополнительно проверен в отдельном стенде с временной
+базой и тестовым путём данных:
+
+- повреждённый файл не перезаписывается;
+- повтор после исправления файла загружает главное окно;
+- диалог аварийного восстановления применяется в ходе полного запуска приложения;
+- команда из другого процесса показывает скрытое главное окно;
+- команда штатного выхода завершает активный период и возвращает успешный результат клиенту.
+
+Проверка выявила удержание повреждённого файла пулом SQLite. При ошибке запуска добавлено
+освобождение пула соединений; повторная проверка прошла успешно.
+
+### Сборки
+
+```sh
+./scripts/build-macos-installer.sh osx-arm64
+```
+
+Результат: созданы `artifacts/WorkTimeRegister-1.6.0-osx-arm64.pkg` и
+`artifacts/WorkTimeRegister-1.6.0-osx-arm64.dmg`. Приложение извлечено из пакета во временную
+папку; `codesign --verify --deep --strict` прошёл успешно, версия в `Info.plist` — `1.6.0`.
+Сохраняется локальная ad-hoc подпись; нотариальное заверение не выполнялось.
+Команда упаковки выводила сообщения `write: Permission denied` и предупреждение об устаревшем
+синтаксисе `hdiutil create`, но завершилась с кодом 0. Независимая проверка извлечённого
+приложения и контрольной суммы окончательного DMG прошла успешно.
+
+```sh
+./scripts/build-windows-installer.sh win-x64
+```
+
+Результат: создан `artifacts/WorkTimeRegister-1.6.0-win-x64-Setup.exe`. Сборка приложения
+и самодостаточного установщика завершилась успешно. Запуск установщика в Windows не выполнялся.
+
+### Что остаётся отдельным этапом
+
+- Перенос правил дня из слоя данных и удаление устаревшего API — без широкого рефакторинга в этой версии.
+- Универсальные категории и учёт проектов — только при появлении соответствующих требований.
+- Типизированные события журнала, автоматические проверки GitHub и единые анализаторы.
+- Полное обновление старого DOCX-ТЗ. Текущее поведение описано в обновлённом `README.md`.
+- Сертификаты подписи и нотариальное заверение для распространения сборок.
+
+JSON журнала по-прежнему не является полной резервной копией SQLite. Существующая рабочая
+база пользователя во время разработки и тестов не открывалась для изменения. Установщики
+не запускались на установку.
+
+### Согласование публикации
+
+Предлагаемое сообщение коммита:
+
+```text
+feat: add crash recovery, sleep pause and safer data handling
+```
+
+В коммит входят перечисленные ниже файлы. Установщики, временные проверки и базы данных
+не входят в Git. Перед созданием коммита и отправкой требуется подтверждение пользователя.
+Подтверждение получено 28 октября 2026 года сообщением «отправляй».
+
+`git diff --check` выполнен успешно. Русская и английская версии правил содержат одинаковые
+45 пунктов верхнего уровня и 10 разделов; перевод выполнен по всему файлу, включая новые правила.
+
+### Изменённые файлы
+
+- [.gitignore](.gitignore)
+- [AGENTS.en.md](AGENTS.en.md)
+- [AGENTS.md](AGENTS.md)
+- [ANALYSIS.md](ANALYSIS.md)
+- [README.md](README.md)
+- [packaging/macos/Info.plist](packaging/macos/Info.plist)
+- [packaging/windows/WorkTimeRegister.Installer/Program.cs](packaging/windows/WorkTimeRegister.Installer/Program.cs)
+- [scripts/build-macos-installer.sh](scripts/build-macos-installer.sh)
+- [src/WorkTimeRegister/App.axaml.cs](src/WorkTimeRegister/App.axaml.cs)
+- [src/WorkTimeRegister/Data/SqliteTimeEntryRepository.Runtime.cs](src/WorkTimeRegister/Data/SqliteTimeEntryRepository.Runtime.cs)
+- [src/WorkTimeRegister/Data/SqliteTimeEntryRepository.WorkDays.cs](src/WorkTimeRegister/Data/SqliteTimeEntryRepository.WorkDays.cs)
+- [src/WorkTimeRegister/Data/SqliteTimeEntryRepository.cs](src/WorkTimeRegister/Data/SqliteTimeEntryRepository.cs)
+- [src/WorkTimeRegister/Models/WorkDay.cs](src/WorkTimeRegister/Models/WorkDay.cs)
+- [src/WorkTimeRegister/Program.cs](src/WorkTimeRegister/Program.cs)
+- [src/WorkTimeRegister/Services/ActionLogJsonService.cs](src/WorkTimeRegister/Services/ActionLogJsonService.cs)
+- [src/WorkTimeRegister/Services/AtomicFileService.cs](src/WorkTimeRegister/Services/AtomicFileService.cs)
+- [src/WorkTimeRegister/Services/ComputerSleepService.cs](src/WorkTimeRegister/Services/ComputerSleepService.cs)
+- [src/WorkTimeRegister/Services/SingleInstanceService.cs](src/WorkTimeRegister/Services/SingleInstanceService.cs)
+- [src/WorkTimeRegister/Services/SizeLimitedReadStream.cs](src/WorkTimeRegister/Services/SizeLimitedReadStream.cs)
+- [src/WorkTimeRegister/Services/WorkDayService.cs](src/WorkTimeRegister/Services/WorkDayService.cs)
+- [src/WorkTimeRegister/ViewModels/LogWindowViewModel.cs](src/WorkTimeRegister/ViewModels/LogWindowViewModel.cs)
+- [src/WorkTimeRegister/ViewModels/MainWindowViewModel.cs](src/WorkTimeRegister/ViewModels/MainWindowViewModel.cs)
+- [src/WorkTimeRegister/Views/ActionLogWindow.axaml](src/WorkTimeRegister/Views/ActionLogWindow.axaml)
+- [src/WorkTimeRegister/Views/ActionLogWindow.axaml.cs](src/WorkTimeRegister/Views/ActionLogWindow.axaml.cs)
+- [src/WorkTimeRegister/Views/ExitErrorDialog.cs](src/WorkTimeRegister/Views/ExitErrorDialog.cs)
+- [src/WorkTimeRegister/Views/RecoveryDialog.cs](src/WorkTimeRegister/Views/RecoveryDialog.cs)
+- [src/WorkTimeRegister/Views/SettingsDialog.axaml](src/WorkTimeRegister/Views/SettingsDialog.axaml)
+- [src/WorkTimeRegister/Views/SettingsDialog.axaml.cs](src/WorkTimeRegister/Views/SettingsDialog.axaml.cs)
+- [src/WorkTimeRegister/Views/StartupErrorWindow.cs](src/WorkTimeRegister/Views/StartupErrorWindow.cs)
+- [tests/WorkTimeRegister.Tests/ActionLogJsonServiceTests.cs](tests/WorkTimeRegister.Tests/ActionLogJsonServiceTests.cs)
+- [tests/WorkTimeRegister.Tests/AtomicFileServiceTests.cs](tests/WorkTimeRegister.Tests/AtomicFileServiceTests.cs)
+- [tests/WorkTimeRegister.Tests/MainWindowViewModelTests.cs](tests/WorkTimeRegister.Tests/MainWindowViewModelTests.cs)
+- [tests/WorkTimeRegister.Tests/RecoveryAndSleepTests.cs](tests/WorkTimeRegister.Tests/RecoveryAndSleepTests.cs)
+- [tests/WorkTimeRegister.Tests/ReliabilityMigrationTests.cs](tests/WorkTimeRegister.Tests/ReliabilityMigrationTests.cs)
+- [tests/WorkTimeRegister.Tests/SingleInstanceServiceTests.cs](tests/WorkTimeRegister.Tests/SingleInstanceServiceTests.cs)
+- [tests/WorkTimeRegister.Tests/WorkDayMigrationTests.cs](tests/WorkTimeRegister.Tests/WorkDayMigrationTests.cs)

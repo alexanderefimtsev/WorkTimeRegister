@@ -69,6 +69,12 @@ public sealed class LogWindowViewModel : ViewModelBase
     public ObservableCollection<ActionLogRowViewModel> Entries { get; } = [];
     public AsyncCommand ApplyFilterCommand { get; }
 
+    public void ReportFileError(string operation, Exception exception)
+    {
+        StatusMessage = null;
+        ErrorMessage = $"Не удалось {operation}: {exception.Message}";
+    }
+
     public async Task<bool> ExportAsync(Stream stream)
     {
         try

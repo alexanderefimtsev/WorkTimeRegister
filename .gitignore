@@ -18,6 +18,7 @@ artifacts/
 *.sqlite3-wal
 *.bak
 *.db.before-workdays-*
+*.db.before-reliability-*
 .env
 .env.*
 !.env.example

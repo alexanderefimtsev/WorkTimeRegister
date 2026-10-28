@@ -138,4 +138,30 @@ public sealed class ActionLogJsonServiceTests
     }
 
     private static MemoryStream CreateStream(string json) => new(Encoding.UTF8.GetBytes(json));
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Import_RejectsOversizedFileIncludingNonSeekableStreams(bool nonSeekable)
+    {
+        var bytes = Encoding.UTF8.GetBytes(new string(' ', 512) + "{}");
+        await using var stream = nonSeekable ? new NonSeekingStream(bytes) : new MemoryStream(bytes);
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            new ActionLogJsonService(128).ImportAsync(stream, TestContext.Current.CancellationToken));
+        Assert.Contains("размер", exception.Message);
+        Assert.True(stream.CanRead);
+    }
+
+    [Fact]
+    public async Task Import_RejectsNullRecordWithReadableError()
+    {
+        await using var stream = CreateStream("""{"format":"WorkTimeRegister.ActionLog","version":2,"entries":[null]}""");
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => service.ImportAsync(stream, TestContext.Current.CancellationToken));
+        Assert.Contains("пустую запись", exception.Message);
+    }
+
+    private sealed class NonSeekingStream(byte[] data) : MemoryStream(data)
+    {
+        public override bool CanSeek => false;
+    }
 }
