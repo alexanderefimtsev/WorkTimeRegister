@@ -18,20 +18,20 @@ public sealed class WorkDayServiceTests
         var started = await context.Run(WorkDayOperation.StartDay);
         Assert.True(started.Day!.IsOpen);
         Assert.Equal(TimeEntryKind.Work, started.Summary.ActiveKind);
-        context.Advance(TimeSpan.FromHours(1));
+        await context.Advance(TimeSpan.FromHours(1));
         await context.Run(WorkDayOperation.StartBreak);
-        context.Advance(TimeSpan.FromMinutes(15));
+        await context.Advance(TimeSpan.FromMinutes(15));
         var ended = await context.Run(WorkDayOperation.EndDay);
         Assert.False(ended.Day!.IsOpen);
         Assert.Null(ended.Summary.ActiveKind);
         Assert.Equal(TimeSpan.FromHours(1), ended.Summary.TotalWork);
         Assert.Equal(TimeSpan.FromMinutes(15), ended.Summary.TotalBreak);
-        context.Advance(TimeSpan.FromHours(2));
+        await context.Advance(TimeSpan.FromHours(2));
         var restarted = await context.Run(WorkDayOperation.StartDay);
         Assert.Equal(started.Day.Id, restarted.Day!.Id);
         Assert.Equal(TimeEntryKind.Work, restarted.Summary.ActiveKind);
         Assert.Equal(TimeSpan.Zero, restarted.Summary.CurrentPeriod);
-        context.Advance(TimeSpan.FromMinutes(10));
+        await context.Advance(TimeSpan.FromMinutes(10));
         var current = await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(TimeSpan.FromMinutes(70), current.Summary.TotalWork);
         Assert.Equal(TimeSpan.FromMinutes(15), current.Summary.TotalBreak);
@@ -52,7 +52,7 @@ public sealed class WorkDayServiceTests
         await context.Run(WorkDayOperation.EndDay);
         await context.Run(WorkDayOperation.Exit);
         Assert.False((await context.Run(WorkDayOperation.Initialize)).Day!.IsOpen);
-        context.Advance(TimeSpan.FromDays(1));
+        await context.Advance(TimeSpan.FromDays(1));
         var tomorrow = await context.Run(WorkDayOperation.Initialize);
         Assert.True(tomorrow.Day!.IsOpen);
         Assert.NotEqual(started.Day.Id, tomorrow.Day.Id);
@@ -67,23 +67,23 @@ public sealed class WorkDayServiceTests
         await using var context = await Context.CreateAsync();
         await context.Settings(new WorkDaySettings(RestoreOnLaunch: true));
         var day = await context.Run(WorkDayOperation.StartDay);
-        context.Advance(TimeSpan.FromMinutes(20));
+        await context.Advance(TimeSpan.FromMinutes(20));
         await context.Run(WorkDayOperation.StartBreak);
-        context.Advance(TimeSpan.FromMinutes(5));
+        await context.Advance(TimeSpan.FromMinutes(5));
         if (paused)
             await context.Run(WorkDayOperation.TogglePause);
         var exited = await context.Run(WorkDayOperation.Exit);
         Assert.Equal(WorkDayCloseReason.ApplicationExit, exited.Day!.CloseReason);
         Assert.Equal(TimeEntryKind.Break, exited.Day.LastMode);
         Assert.Equal(paused, exited.Day.WasPaused);
-        context.Advance(TimeSpan.FromHours(2));
+        await context.Advance(TimeSpan.FromHours(2));
         var restored = await context.Run(WorkDayOperation.Initialize);
         Assert.Equal(day.Day!.Id, restored.Day!.Id);
         Assert.Equal(TimeEntryKind.Break, restored.Summary.ActiveKind);
         Assert.Equal(paused, restored.Summary.IsPaused);
         Assert.Equal(TimeSpan.Zero, restored.Summary.CurrentPeriod);
         Assert.Equal(TimeSpan.FromMinutes(5), restored.Summary.TotalBreak);
-        context.Advance(TimeSpan.FromMinutes(10));
+        await context.Advance(TimeSpan.FromMinutes(10));
         restored = await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(TimeSpan.FromMinutes(paused ? 5 : 15), restored.Summary.TotalBreak);
         Assert.Equal(TimeSpan.FromMinutes(20), restored.Summary.TotalWork);
@@ -97,7 +97,7 @@ public sealed class WorkDayServiceTests
         await context.Run(WorkDayOperation.Exit);
         Assert.False((await context.Run(WorkDayOperation.Initialize)).Day!.IsOpen);
         await context.Settings(new WorkDaySettings(RestoreOnLaunch: true, AutoContinueAtMidnight: true));
-        context.Advance(TimeSpan.FromDays(2));
+        await context.Advance(TimeSpan.FromDays(2));
         Assert.Null((await context.Run(WorkDayOperation.Initialize)).Day);
         Assert.Equal(1, await context.CountAsync("WorkDays"));
     }
@@ -121,7 +121,7 @@ public sealed class WorkDayServiceTests
             await context.Run(WorkDayOperation.StartBreak);
         if (paused)
         {
-            context.Advance(TimeSpan.FromSeconds(5));
+            await context.Advance(TimeSpan.FromSeconds(5));
             await context.Run(WorkDayOperation.TogglePause);
         }
         context.At(start.AddSeconds(20));
@@ -164,14 +164,14 @@ public sealed class WorkDayServiceTests
         await using var context = await Context.CreateAsync(start);
         await context.Settings(new WorkDaySettings(AutoContinueAtMidnight: true));
         await context.Run(WorkDayOperation.StartDay);
-        context.Advance(TimeSpan.FromDays(2) + TimeSpan.FromHours(2));
+        await context.Advance(TimeSpan.FromDays(2) + TimeSpan.FromHours(2));
         var today = await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(TimeSpan.FromHours(1), today.Summary.TotalWork);
         Assert.Equal(4, await context.CountAsync("WorkDays"));
         await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(4, await context.CountAsync("WorkDays"));
         await context.Run(WorkDayOperation.EndDay);
-        context.Advance(TimeSpan.FromDays(2));
+        await context.Advance(TimeSpan.FromDays(2));
         await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(4, await context.CountAsync("WorkDays"));
     }
@@ -185,7 +185,7 @@ public sealed class WorkDayServiceTests
         await context.Run(WorkDayOperation.StartDay);
         await context.Service.ExecuteAsync(WorkDayOperation.AdjustTime, adjustment: TimeAdjustmentOperation.Add,
             category: TimeEntryKind.Work, amount: TimeSpan.FromHours(2));
-        context.Advance(TimeSpan.FromSeconds(20));
+        await context.Advance(TimeSpan.FromSeconds(20));
         var today = await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(TimeSpan.FromSeconds(10), today.Summary.TotalWork);
         Assert.Equal(TimeSpan.FromSeconds(10), today.Summary.CurrentPeriod);
@@ -202,7 +202,7 @@ public sealed class WorkDayServiceTests
         await using var context = await Context.CreateAsync(WorkDayService.Boundary(date, zone), zone);
         await context.Settings(new WorkDaySettings(AutoContinueAtMidnight: true));
         await context.Run(WorkDayOperation.StartDay);
-        context.At(WorkDayService.Boundary(date.AddDays(1), zone).AddHours(1));
+        await context.Advance(WorkDayService.Boundary(date.AddDays(1), zone).AddHours(1) - context.Clock.Current);
         var today = await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(date.AddDays(1), today.Date);
         Assert.Equal(TimeSpan.FromHours(1), today.Summary.TotalWork);
@@ -256,7 +256,15 @@ public sealed class WorkDayServiceTests
 
         public Task<WorkDaySnapshot> Run(WorkDayOperation operation) => Service.ExecuteAsync(operation);
         public Task<WorkDaySnapshot> Settings(WorkDaySettings value) => Service.ExecuteAsync(WorkDayOperation.SaveSettings, value);
-        public void Advance(TimeSpan amount) => Clock.Current = Clock.Current.Add(amount);
+        public async Task Advance(TimeSpan amount)
+        {
+            var end = Clock.Current + amount;
+            while (Clock.Current < end)
+            {
+                Clock.Current = Clock.Current.AddSeconds(30) < end ? Clock.Current.AddSeconds(30) : end;
+                await Service.ExecuteAsync(WorkDayOperation.Refresh);
+            }
+        }
         public void At(DateTimeOffset at) => Clock.Current = at;
 
         public async Task<long> CountAsync(string table)

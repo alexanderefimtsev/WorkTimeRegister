@@ -168,6 +168,7 @@ internal static class Program
         var scriptPath = Path.Combine(installationDirectory, "Uninstall.cmd");
         var script = """
             @echo off
+            chcp 65001 >nul
             "%~dp0WorkTimeRegister.exe" --shutdown
             if errorlevel 1 (
                 echo Не удалось штатно завершить WorkTimeRegister. Сохраните данные и закройте приложение, затем повторите удаление.

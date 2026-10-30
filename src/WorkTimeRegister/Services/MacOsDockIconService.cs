@@ -14,9 +14,11 @@ internal sealed class MacOsDockIconService : IDockIconService
     private bool hasPresentation;
     private bool disabled;
     private bool disposed;
+    private readonly Action<Exception>? failed;
 
-    public MacOsDockIconService()
+    public MacOsDockIconService(Action<Exception>? failed = null)
     {
+        this.failed = failed;
         using var stream = AssetLoader.Open(BaseIconUri);
         baseIcon = SKBitmap.Decode(stream)
             ?? throw new InvalidOperationException("Unable to load the application icon.");
@@ -50,6 +52,7 @@ internal sealed class MacOsDockIconService : IDockIconService
             disabled = true;
             ReportFailure("Unable to update the macOS Dock icon", exception);
             TryReset();
+            failed?.Invoke(exception);
         }
     }
 

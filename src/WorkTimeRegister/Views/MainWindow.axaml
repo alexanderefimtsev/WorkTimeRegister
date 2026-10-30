@@ -5,7 +5,8 @@
         x:DataType="vm:MainWindowViewModel"
         Title="Учёт рабочего времени"
         Icon="avares://WorkTimeRegister/Assets/AppIcon-1024.png"
-        Width="900" Height="520" MinWidth="840" MinHeight="520"
+        Width="900" MinWidth="840" MinHeight="520"
+        SizeToContent="Height"
         WindowStartupLocation="CenterScreen">
   <Window.Resources>
     <StreamGeometry x:Key="PlayIcon">M3,2 L14,8 L3,14 Z</StreamGeometry>
@@ -169,9 +170,20 @@
       </Border>
     </StackPanel>
 
-    <Border Grid.Row="3" IsVisible="{Binding HasError}"
+    <StackPanel Grid.Row="3" Spacing="6">
+    <Border IsVisible="{Binding HasError}"
             Background="#25EF4444" CornerRadius="8" Padding="12">
+      <StackPanel Spacing="6">
       <TextBlock Text="{Binding ErrorMessage}" Foreground="#DC2626" TextWrapping="Wrap" />
+      <Button Content="Повторить обработку события" IsVisible="{Binding HasPendingPowerEvents}" Click="RetryPowerEvents" />
+      </StackPanel>
     </Border>
+    <Border IsVisible="{Binding HasIntegrationWarning}" Background="#25F59E0B" CornerRadius="8" Padding="12">
+      <StackPanel Spacing="6">
+        <TextBlock Text="{Binding IntegrationWarning}" TextWrapping="Wrap" />
+        <Button Content="Повторить подключение" Click="RetryIntegrations" />
+      </StackPanel>
+    </Border>
+    </StackPanel>
   </Grid>
 </Window>

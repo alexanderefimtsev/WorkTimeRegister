@@ -3,9 +3,10 @@ using WorkTimeRegister.Models;
 
 namespace WorkTimeRegister.Services;
 
-public sealed class WorkDayService(ITimeEntryRepository repository, TimeProvider timeProvider)
+public sealed class WorkDayService(ITimeEntryRepository repository, TimeProvider timeProvider, Guid? session = null)
 {
-    private readonly Guid sessionId = Guid.NewGuid();
+    private static readonly Guid ProcessSessionId = Guid.NewGuid();
+    private readonly Guid sessionId = session ?? ProcessSessionId;
     public Task<WorkDaySnapshot> ExecuteAsync(
         WorkDayOperation operation,
         WorkDaySettings? settings = null,
@@ -13,7 +14,9 @@ public sealed class WorkDayService(ITimeEntryRepository repository, TimeProvider
         TimeEntryKind category = TimeEntryKind.Work,
         TimeSpan amount = default,
         RecoveryChoice recovery = RecoveryChoice.Exclude,
-        DateTimeOffset? at = null) =>
+        DateTimeOffset? at = null,
+        Guid powerCycleId = default,
+        bool? paused = null) =>
         repository.ProcessWorkDayAsync(new WorkDayRequest(
             operation,
             at ?? timeProvider.GetUtcNow(),
@@ -23,7 +26,9 @@ public sealed class WorkDayService(ITimeEntryRepository repository, TimeProvider
             category,
             amount,
             sessionId,
-            recovery));
+            recovery,
+            powerCycleId,
+            paused));
 
     public static DateTimeOffset Boundary(DateOnly date, TimeZoneInfo timeZone)
     {

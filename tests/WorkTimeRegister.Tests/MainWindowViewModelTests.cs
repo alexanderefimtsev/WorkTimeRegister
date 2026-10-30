@@ -132,7 +132,7 @@ public sealed class MainWindowViewModelTests
             Assert.Equal("Работаю…", viewModel.CurrentPeriodTitle);
             Assert.Equal(TimeSpan.FromHours(1), viewModel.CurrentPeriodValue);
 
-            timeProvider.Advance(TimeSpan.FromMinutes(15));
+            await AdvanceAlive(viewModel, timeProvider, TimeSpan.FromMinutes(15));
             await viewModel.TogglePauseAsync();
 
             Assert.True(viewModel.IsPaused);
@@ -162,10 +162,10 @@ public sealed class MainWindowViewModelTests
                 Assert.True(await viewModel.SaveSettingsAsync(new WorkDaySettings(RestoreOnLaunch: true)));
                 Assert.False(viewModel.IsWorkDayOpen);
                 await viewModel.ToggleWorkDayAsync();
-                timeProvider.Advance(TimeSpan.FromMinutes(30));
+                await AdvanceAlive(viewModel, timeProvider, TimeSpan.FromMinutes(30));
                 viewModel.StartBreakCommand.Execute(null);
                 await WaitForAsync(() => viewModel.ActiveKind == TimeEntryKind.Break);
-                timeProvider.Advance(TimeSpan.FromMinutes(5));
+                await AdvanceAlive(viewModel, timeProvider, TimeSpan.FromMinutes(5));
                 await viewModel.TogglePauseAsync();
                 Assert.True(await viewModel.PrepareForExitAsync());
                 Assert.False(viewModel.IsWorkDayOpen);
@@ -191,6 +191,15 @@ public sealed class MainWindowViewModelTests
         {
             if (Directory.Exists(directory))
                 Directory.Delete(directory, true);
+        }
+    }
+
+    private static async Task AdvanceAlive(MainWindowViewModel viewModel, MutableTimeProvider clock, TimeSpan amount)
+    {
+        for (var elapsed = TimeSpan.Zero; elapsed < amount; elapsed += TimeSpan.FromSeconds(30))
+        {
+            clock.Advance(TimeSpan.FromSeconds(30));
+            await viewModel.RefreshAsync();
         }
     }
 

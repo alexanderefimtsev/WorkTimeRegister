@@ -7,6 +7,20 @@ namespace WorkTimeRegister.Views;
 
 public sealed partial class MainWindow : Window
 {
+    public event Action? RetryIntegrationsRequested;
+    internal void CloseForReplacement()
+    {
+        Closing -= MainWindowClosing;
+        Close();
+    }
+
+    private void RetryIntegrations(object? sender, RoutedEventArgs e) => RetryIntegrationsRequested?.Invoke();
+
+    private async void RetryPowerEvents(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+            await viewModel.RetryPowerEventsAsync();
+    }
     public MainWindow()
     {
         InitializeComponent();

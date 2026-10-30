@@ -1,22 +1,12 @@
-using System.Diagnostics;
-
 namespace WorkTimeRegister.Services;
 
 internal static class DockIconServiceFactory
 {
-    public static IDockIconService Create()
+    public static IDockIconService Create(Action<Exception>? failed = null)
     {
         if (!OperatingSystem.IsMacOS())
             return new NoOpDockIconService();
 
-        try
-        {
-            return new MacOsDockIconService();
-        }
-        catch (Exception exception)
-        {
-            Trace.WriteLine($"Unable to initialize the macOS Dock icon: {exception}");
-            return new NoOpDockIconService();
-        }
+        return new MacOsDockIconService(failed);
     }
 }

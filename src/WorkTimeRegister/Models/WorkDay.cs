@@ -31,9 +31,11 @@ public sealed record WorkDaySettings(
     bool ResumeAfterSleep = false);
 
 public enum RecoveryChoice { Exclude, Include, Custom }
+public enum RecoveryOrigin { Crash, LegacyUpgrade, MissedUpdates, Unspecified }
 
 public sealed record RecoveryInfo(DateTimeOffset ConfirmedAt, DateTimeOffset DetectedAt,
-    TimeEntryKind Mode, bool WasPaused, TimeSpan MaximumCountableDuration)
+    TimeEntryKind Mode, bool WasPaused, TimeSpan MaximumCountableDuration,
+    RecoveryOrigin Origin = RecoveryOrigin.Crash)
 {
     public TimeSpan Duration => DetectedAt - ConfirmedAt;
 }
@@ -66,7 +68,9 @@ public sealed record WorkDayRequest(
     TimeEntryKind Category = TimeEntryKind.Work,
     TimeSpan Amount = default,
     Guid SessionId = default,
-    RecoveryChoice Recovery = RecoveryChoice.Exclude);
+    RecoveryChoice Recovery = RecoveryChoice.Exclude,
+    Guid PowerCycleId = default,
+    bool? Paused = null);
 
 public sealed record WorkDaySnapshot(
     WorkDay? Day,

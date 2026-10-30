@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Avalonia.Controls;
@@ -10,13 +11,31 @@ public sealed class ComputerSleepService : IDisposable
     private readonly TopLevel window;
     private readonly Action<bool> changed;
     private readonly IDisposable? nativeObserver;
+    private readonly IntPtr windowsRegistration;
+    private bool disposed;
 
     public ComputerSleepService(TopLevel window, Action<bool> changed)
     {
         this.window = window;
         this.changed = changed;
         if (OperatingSystem.IsWindows())
-            Win32Properties.AddWndProcHookCallback(window, WindowMessage);
+        {
+            var handle = window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException("Окно ещё не готово к получению уведомлений сна.");
+            windowsRegistration = RegisterSuspendResumeNotification(handle, 0);
+            if (windowsRegistration == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось зарегистрировать уведомления сна.");
+            try
+            {
+                Win32Properties.AddWndProcHookCallback(window, WindowMessage);
+            }
+            catch
+            {
+                UnregisterSuspendResumeNotification(windowsRegistration);
+                throw;
+            }
+        }
         else if (OperatingSystem.IsMacOS())
             nativeObserver = new MacObserver(changed);
     }
@@ -33,10 +52,22 @@ public sealed class ComputerSleepService : IDisposable
 
     public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
         if (OperatingSystem.IsWindows())
+        {
             Win32Properties.RemoveWndProcHookCallback(window, WindowMessage);
+            if (windowsRegistration != IntPtr.Zero)
+                UnregisterSuspendResumeNotification(windowsRegistration);
+        }
         nativeObserver?.Dispose();
     }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr RegisterSuspendResumeNotification(IntPtr recipient, uint flags);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterSuspendResumeNotification(IntPtr handle);
 
     private sealed class MacObserver : IDisposable
     {

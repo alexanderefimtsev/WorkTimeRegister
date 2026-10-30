@@ -20,7 +20,7 @@ public sealed class RecoveryAndSleepTests
         await using var context = await Context.Create();
         await context.Run(WorkDayOperation.StartDay);
         if (kind == TimeEntryKind.Break) await context.Run(WorkDayOperation.StartBreak);
-        context.Clock.Current = context.Clock.Current.AddHours(5);
+        await context.AdvanceAlive(TimeSpan.FromHours(5));
         await context.Run(WorkDayOperation.Refresh);
         context.Clock.Current = context.Clock.Current.AddHours(1);
         context.Restart();
@@ -39,7 +39,7 @@ public sealed class RecoveryAndSleepTests
         var paused = await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(TimeSpan.FromHours(hours), Total(paused, kind));
         await context.Run(WorkDayOperation.TogglePause);
-        context.Clock.Current = context.Clock.Current.AddMinutes(20);
+        await context.AdvanceAlive(TimeSpan.FromMinutes(20));
         var active = await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(TimeSpan.FromHours(hours) + TimeSpan.FromMinutes(20), Total(active, kind));
         var ended = await context.Run(WorkDayOperation.EndDay);
@@ -58,7 +58,7 @@ public sealed class RecoveryAndSleepTests
         await using var context = await Context.Create(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.FromHours(3)));
         await context.Service.ExecuteAsync(WorkDayOperation.SaveSettings, new WorkDaySettings(AutoContinueAtMidnight: true));
         await context.Run(WorkDayOperation.StartDay);
-        context.Clock.Current = context.Clock.Current.AddHours(9);
+        await context.AdvanceAlive(TimeSpan.FromHours(9));
         await context.Run(WorkDayOperation.Refresh);
         context.Clock.Current = context.Clock.Current.AddDays(2).AddHours(15);
         context.Restart();
@@ -80,7 +80,7 @@ public sealed class RecoveryAndSleepTests
         await context.Service.ExecuteAsync(WorkDayOperation.SaveSettings,
             new WorkDaySettings(AutoContinueAtMidnight: true, ResumeAfterSleep: autoResume));
         await context.Run(WorkDayOperation.StartDay);
-        context.Clock.Current = context.Clock.Current.AddHours(9);
+        await context.AdvanceAlive(TimeSpan.FromHours(9));
         await context.Run(WorkDayOperation.Suspend);
         context.Clock.Current = context.Clock.Current.AddDays(2).AddHours(15);
         var resumed = await context.Run(WorkDayOperation.Resume);
@@ -89,7 +89,7 @@ public sealed class RecoveryAndSleepTests
         Assert.Equal(TimeSpan.Zero, await context.WorkOn(new DateOnly(2026, 10, 24)));
         Assert.Equal(TimeSpan.Zero, await context.WorkOn(new DateOnly(2026, 10, 25)));
         Assert.Equal(TimeSpan.Zero, resumed.Summary.TotalWork);
-        context.Clock.Current = context.Clock.Current.AddMinutes(30);
+        await context.AdvanceAlive(TimeSpan.FromMinutes(30));
         var later = await context.Run(WorkDayOperation.Refresh);
         Assert.Equal(autoResume ? TimeSpan.FromMinutes(30) : TimeSpan.Zero, later.Summary.TotalWork);
     }
@@ -105,7 +105,7 @@ public sealed class RecoveryAndSleepTests
         await context.Service.ExecuteAsync(WorkDayOperation.SaveSettings, new WorkDaySettings(ResumeAfterSleep: true));
         await context.Run(WorkDayOperation.StartDay);
         if (kind == TimeEntryKind.Break) await context.Run(WorkDayOperation.StartBreak);
-        context.Clock.Current = context.Clock.Current.AddHours(1);
+        await context.AdvanceAlive(TimeSpan.FromHours(1));
         if (initiallyPaused) await context.Run(WorkDayOperation.TogglePause);
         await context.Run(WorkDayOperation.Suspend);
         context.Clock.Current = context.Clock.Current.AddHours(2);
@@ -134,7 +134,7 @@ public sealed class RecoveryAndSleepTests
     {
         await using var context = await Context.Create();
         await context.Run(WorkDayOperation.StartDay);
-        context.Clock.Current = context.Clock.Current.AddHours(1);
+        await context.AdvanceAlive(TimeSpan.FromHours(1));
         await context.Run(WorkDayOperation.TogglePause);
         context.Clock.Current = context.Clock.Current.AddHours(2);
         context.Restart();
@@ -166,7 +166,7 @@ public sealed class RecoveryAndSleepTests
     {
         await using var context = await Context.Create(new DateTimeOffset(2026, 10, 28, 23, 0, 0, TimeSpan.FromHours(3)));
         await context.Run(WorkDayOperation.StartDay);
-        context.Clock.Current = context.Clock.Current.AddMinutes(30);
+        await context.AdvanceAlive(TimeSpan.FromMinutes(30));
         await context.Run(WorkDayOperation.Refresh);
         context.Clock.Current = context.Clock.Current.AddMinutes(90);
         context.Restart();
@@ -199,7 +199,7 @@ public sealed class RecoveryAndSleepTests
     {
         await using var context = await Context.Create();
         await context.Run(WorkDayOperation.StartDay);
-        context.Clock.Current = context.Clock.Current.AddHours(9);
+        await context.AdvanceAlive(TimeSpan.FromHours(9));
         await context.Run(WorkDayOperation.Suspend);
         context.Clock.Current = context.Clock.Current.AddDays(3);
         var resumed = await context.Run(WorkDayOperation.Resume);
@@ -209,16 +209,19 @@ public sealed class RecoveryAndSleepTests
     }
 
     [Fact]
-    public async Task WakeWithoutSuspendNotification_UsesLastCheckpointAndPauses()
+    public async Task WakeWithoutSuspendNotification_RequiresAnExplicitDecision()
     {
         await using var context = await Context.Create();
         await context.Run(WorkDayOperation.StartDay);
-        context.Clock.Current = context.Clock.Current.AddHours(1);
+        await context.AdvanceAlive(TimeSpan.FromHours(1));
         await context.Run(WorkDayOperation.Refresh);
         context.Clock.Current = context.Clock.Current.AddHours(2);
         var result = await context.Run(WorkDayOperation.Resume);
-        Assert.True(result.Summary.IsPaused);
+        Assert.Equal(RecoveryOrigin.MissedUpdates, result.Recovery!.Origin);
         Assert.Equal(TimeSpan.FromHours(1), result.Summary.TotalWork);
+        var resolved = await context.Run(WorkDayOperation.ResolveRecovery);
+        Assert.True(resolved.Summary.IsPaused);
+        Assert.Equal(TimeSpan.FromHours(1), resolved.Summary.TotalWork);
     }
 
     [Fact]
@@ -251,7 +254,16 @@ public sealed class RecoveryAndSleepTests
             await repository.InitializeAsync(clock);
             return new Context(path, clock, repository);
         }
-        public void Restart() => Service = new WorkDayService(Repository, Clock);
+        public void Restart() => Service = new WorkDayService(Repository, Clock, Guid.NewGuid());
+        public async Task AdvanceAlive(TimeSpan amount)
+        {
+            var end = Clock.Current + amount;
+            while (Clock.Current < end)
+            {
+                Clock.Current = Clock.Current.AddSeconds(30) < end ? Clock.Current.AddSeconds(30) : end;
+                await Run(WorkDayOperation.Refresh);
+            }
+        }
         public Task<WorkDaySnapshot> Run(WorkDayOperation operation) => Service.ExecuteAsync(operation);
         public async Task<long> Scalar(string sql)
         {

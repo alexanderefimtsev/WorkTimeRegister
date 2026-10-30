@@ -31,7 +31,12 @@ public sealed class DockMenuCoordinator : IDisposable
         viewModel.TogglePauseCommand.CanExecuteChanged += CommandCanExecuteChanged;
         viewModel.ToggleWorkDayCommand.CanExecuteChanged += CommandCanExecuteChanged;
         Menu.NeedsUpdate += MenuNeedsUpdate;
-        Update();
+        try { Update(); }
+        catch
+        {
+            Dispose();
+            throw;
+        }
     }
 
     public NativeMenu Menu { get; }

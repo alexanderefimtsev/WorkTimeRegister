@@ -5,7 +5,7 @@ namespace WorkTimeRegister.Data;
 
 public sealed partial class SqliteTimeEntryRepository
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
 
     private static async Task ValidateSchemaVersionAsync(SqliteConnection connection)
     {
@@ -19,7 +19,8 @@ public sealed partial class SqliteTimeEntryRepository
     {
         using var probe = connection.CreateCommand();
         probe.CommandText = "PRAGMA user_version;";
-        if (Convert.ToInt32(await probe.ExecuteScalarAsync()) == SchemaVersion)
+        var version = Convert.ToInt32(await probe.ExecuteScalarAsync());
+        if (version == SchemaVersion)
             return;
         probe.CommandText = "SELECT COUNT(*) FROM TimeEntries;";
         if (Convert.ToInt64(await probe.ExecuteScalarAsync()) > 0)
@@ -31,6 +32,7 @@ public sealed partial class SqliteTimeEntryRepository
         }
 
         await using var transaction = connection.BeginTransaction();
+        if (version < 2)
         await ExecuteSqlAsync(connection, transaction, """
             ALTER TABLE WorkDaySettings ADD COLUMN PauseDuringSleep INTEGER NOT NULL DEFAULT 1;
             ALTER TABLE WorkDaySettings ADD COLUMN ResumeAfterSleep INTEGER NOT NULL DEFAULT 0;
@@ -60,22 +62,34 @@ public sealed partial class SqliteTimeEntryRepository
                 CASE WHEN EXISTS(SELECT 1 FROM WorkDays WHERE StartedAt IS NOT NULL AND EndedAt IS NULL) THEN 1 ELSE 0 END;
             PRAGMA user_version=2;
             """);
+        await ExecuteSqlAsync(connection, transaction, """
+            ALTER TABLE ApplicationState ADD COLUMN RecoveryKind INTEGER NULL;
+            ALTER TABLE ApplicationState ADD COLUMN SleepCycleId TEXT NULL;
+            ALTER TABLE ApplicationState ADD COLUMN LastPowerEventAt TEXT NULL;
+            ALTER TABLE ApplicationState ADD COLUMN LastUserActionAt TEXT NULL;
+            UPDATE ApplicationState SET RecoveryKind=CASE WHEN SessionId IS NULL AND IsRunning=1 THEN 1
+                WHEN RecoveryFrom IS NOT NULL THEN 3 ELSE NULL END;
+            PRAGMA user_version=3;
+            """);
         await transaction.CommitAsync();
     }
 
     private sealed record RuntimeState(string? SessionId, DateTimeOffset? LastSeenAt, bool IsRunning,
-        DateTimeOffset? RecoveryFrom, DateTimeOffset? RecoveryTo, DateTimeOffset? SleepStartedAt, bool SleepAutoPaused);
+        DateTimeOffset? RecoveryFrom, DateTimeOffset? RecoveryTo, DateTimeOffset? SleepStartedAt, bool SleepAutoPaused,
+        RecoveryOrigin? RecoveryKind, string? SleepCycleId, DateTimeOffset? LastPowerEventAt, DateTimeOffset? LastUserActionAt);
 
     private static async Task<RuntimeState> ReadRuntimeAsync(SqliteConnection connection, SqliteTransaction transaction)
     {
         using var command = CreateSql(connection, transaction,
-            "SELECT SessionId,LastSeenAt,IsRunning,RecoveryFrom,RecoveryTo,SleepStartedAt,SleepAutoPaused FROM ApplicationState WHERE Id=1;");
+            "SELECT SessionId,LastSeenAt,IsRunning,RecoveryFrom,RecoveryTo,SleepStartedAt,SleepAutoPaused,RecoveryKind,SleepCycleId,LastPowerEventAt,LastUserActionAt FROM ApplicationState WHERE Id=1;");
         await using var reader = await command.ExecuteReaderAsync();
         await reader.ReadAsync();
         return new RuntimeState(reader.IsDBNull(0) ? null : reader.GetString(0),
             reader.IsDBNull(1) ? null : Parse(reader.GetString(1)), reader.GetInt32(2) != 0,
             reader.IsDBNull(3) ? null : Parse(reader.GetString(3)), reader.IsDBNull(4) ? null : Parse(reader.GetString(4)),
-            reader.IsDBNull(5) ? null : Parse(reader.GetString(5)), reader.GetInt32(6) != 0);
+            reader.IsDBNull(5) ? null : Parse(reader.GetString(5)), reader.GetInt32(6) != 0,
+            reader.IsDBNull(7) ? null : (RecoveryOrigin)reader.GetInt32(7), reader.IsDBNull(8) ? null : reader.GetString(8),
+            reader.IsDBNull(9) ? null : Parse(reader.GetString(9)), reader.IsDBNull(10) ? null : Parse(reader.GetString(10)));
     }
 
     private static async Task<RecoveryInfo?> DetectRecoveryAsync(SqliteConnection connection, SqliteTransaction transaction,
@@ -85,19 +99,29 @@ public sealed partial class SqliteTimeEntryRepository
             return null;
         var interrupted = request.Operation == WorkDayOperation.Initialize && state.IsRunning &&
                           state.SessionId != request.SessionId.ToString();
-        var from = state.RecoveryFrom ?? (interrupted ? state.LastSeenAt : null);
+        var missedUpdates = !interrupted && settings.PauseDuringSleep && state.SleepStartedAt is null &&
+            state.LastSeenAt.HasValue && request.Now - state.LastSeenAt.Value > TimeSpan.FromSeconds(60) &&
+            request.Operation != WorkDayOperation.ResolveRecovery;
+        if (missedUpdates)
+        {
+            var before = await ReadSummaryAsync(connection, transaction, openDay, state.LastSeenAt!.Value);
+            missedUpdates = !before.IsPaused && before.ActiveKind.HasValue;
+        }
+        var from = state.RecoveryFrom ?? (interrupted || missedUpdates ? state.LastSeenAt : null);
         if (!from.HasValue)
             return null;
-        var to = request.Operation == WorkDayOperation.Initialize ? request.Now : state.RecoveryTo ?? request.Now;
+        var knownSleepBoundary = state.RecoveryKind == RecoveryOrigin.MissedUpdates && state.SleepStartedAt.HasValue;
+        var to = request.Operation == WorkDayOperation.Initialize && !knownSleepBoundary ? request.Now : state.RecoveryTo ?? request.Now;
         if (to < from.Value)
             throw new InvalidOperationException("Время компьютера раньше последней сохранённой активности. Проверьте дату и время.");
+        var origin = state.RecoveryKind ?? (interrupted ? RecoveryOrigin.Crash : RecoveryOrigin.MissedUpdates);
         await ExecuteSqlAsync(connection, transaction,
-            "UPDATE ApplicationState SET RecoveryFrom=$from, RecoveryTo=$to, SessionId=$session WHERE Id=1;",
-            ("$from", Format(from.Value)), ("$to", Format(to)), ("$session", request.SessionId.ToString()));
+            "UPDATE ApplicationState SET RecoveryFrom=$from, RecoveryTo=$to, RecoveryKind=$kind, SessionId=$session WHERE Id=1;",
+            ("$from", Format(from.Value)), ("$to", Format(to)), ("$kind", (int)origin), ("$session", request.SessionId.ToString()));
         var summary = await ReadSummaryAsync(connection, transaction, openDay, from.Value);
         var countableEnd = !settings.AutoContinueAtMidnight && openDay.DayEnd < to ? openDay.DayEnd : to;
         var maximum = countableEnd > from.Value ? countableEnd - from.Value : TimeSpan.Zero;
-        return new RecoveryInfo(from.Value, to, summary.ActiveKind ?? openDay.LastMode, summary.IsPaused, maximum);
+        return new RecoveryInfo(from.Value, to, summary.ActiveKind ?? openDay.LastMode, summary.IsPaused, maximum, origin);
     }
 
     private static async Task<DateTimeOffset?> ApplyRecoveryAsync(SqliteConnection connection, SqliteTransaction transaction,
@@ -114,7 +138,7 @@ public sealed partial class SqliteTimeEntryRepository
         if (amount < TimeSpan.Zero || amount > recovery.MaximumCountableDuration)
             throw new InvalidOperationException("Указанное время превышает допустимый интервал с учётом границы рабочего дня.");
         await ExecuteSqlAsync(connection, transaction,
-            "UPDATE ApplicationState SET RecoveryFrom=NULL, RecoveryTo=NULL, SleepStartedAt=NULL, SleepAutoPaused=0 WHERE Id=1;");
+            "UPDATE ApplicationState SET RecoveryFrom=NULL, RecoveryTo=NULL, RecoveryKind=NULL, SleepStartedAt=NULL, SleepAutoPaused=0, SleepCycleId=NULL WHERE Id=1;");
         return recovery.WasPaused ? null : recovery.ConfirmedAt + amount;
     }
 
@@ -140,7 +164,7 @@ public sealed partial class SqliteTimeEntryRepository
             request.Now >= state.LastSeenAt.Value && request.Now - state.LastSeenAt.Value < TimeSpan.FromSeconds(15))
             return;
         await ExecuteSqlAsync(connection, transaction,
-            "UPDATE ApplicationState SET SessionId=$session, LastSeenAt=$at, IsRunning=$running WHERE Id=1;",
+            "UPDATE ApplicationState SET SessionId=$session, LastSeenAt=MAX(COALESCE(LastSeenAt,$at),$at), IsRunning=$running WHERE Id=1;",
             ("$session", request.SessionId.ToString()), ("$at", Format(request.Now)),
             ("$running", request.Operation == WorkDayOperation.Exit ? 0 : 1));
     }

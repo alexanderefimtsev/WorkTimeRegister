@@ -16,7 +16,13 @@ public sealed class DockIconCoordinator : IDisposable
         this.viewModel = viewModel;
         this.dockIconService = dockIconService;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        Update();
+        try { Update(); }
+        catch
+        {
+            viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            dockIconService.Dispose();
+            throw;
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
