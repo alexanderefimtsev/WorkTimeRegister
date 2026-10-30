@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -8,14 +9,24 @@ namespace WorkTimeRegister.Services;
 public sealed class SingleInstanceService : IDisposable
 {
     private readonly FileStream lease;
+    private readonly FileStream? legacyLease;
     private readonly CancellationTokenSource cancellation = new();
     private readonly string pipeName;
+    private readonly UnixInstanceSocket? unixSocket;
     private readonly Task listener;
 
-    private SingleInstanceService(FileStream lease, string pipeName)
+    private SingleInstanceService(FileStream lease, FileStream? legacyLease, string pipeName)
     {
         this.lease = lease;
+        this.legacyLease = legacyLease;
         this.pipeName = pipeName;
+        if (OperatingSystem.IsWindows())
+        {
+            // Detect pipe creation errors before time tracking starts.
+            using var probe = CreatePipeServer();
+        }
+        else
+            unixSocket = new UnixInstanceSocket(pipeName);
         listener = Task.Run(ListenAsync);
     }
 
@@ -25,16 +36,71 @@ public sealed class SingleInstanceService : IDisposable
     private static string Identity(string dataPath) =>
         "WorkTimeRegister-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(dataPath))))[..24];
 
+    private NamedPipeServerStream CreatePipeServer() => new(pipeName, PipeDirection.InOut, 1,
+        PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+    private static string LockPath(string identity) => OperatingSystem.IsWindows()
+        ? LegacyLockPath(identity) : UnixInstanceSocket.LockPath(identity);
+
+    private static string LegacyLockPath(string identity) => Path.Combine(Path.GetTempPath(), identity + ".lock");
+
+    public static bool HasActiveLease(string dataPath)
+    {
+        try
+        {
+            using var probe = new FileStream(LockPath(Identity(dataPath)), FileMode.OpenOrCreate,
+                FileAccess.ReadWrite, FileShare.None);
+            if (!OperatingSystem.IsWindows())
+            {
+                using var legacyProbe = new FileStream(LegacyLockPath(Identity(dataPath)), FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite, FileShare.None);
+            }
+            return false;
+        }
+        catch (IOException) { return true; }
+    }
+
+    public static async Task<bool> RequestShutdownAsync(string dataPath, CancellationToken cancellationToken = default)
+    {
+        if (!HasActiveLease(dataPath))
+            return true;
+        await SendAsync(dataPath, exit: true, cancellationToken);
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            if (!HasActiveLease(dataPath))
+                return true;
+            await Task.Delay(100, cancellationToken);
+        }
+        return !HasActiveLease(dataPath);
+    }
+
     public static SingleInstanceService? TryAcquire(string dataPath)
     {
         var identity = Identity(dataPath);
-        var lockPath = Path.Combine(Path.GetTempPath(), identity + ".lock");
+        var lockPath = LockPath(identity);
+        FileStream stream;
+        FileStream? legacy = null;
         try
         {
-            var stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            return new SingleInstanceService(stream, identity);
+            stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            if (!OperatingSystem.IsWindows())
+            {
+                try { legacy = new FileStream(LegacyLockPath(identity), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+                catch
+                {
+                    stream.Dispose();
+                    throw;
+                }
+            }
         }
         catch (IOException) { return null; }
+        try { return new SingleInstanceService(stream, legacy, identity); }
+        catch (Exception exception)
+        {
+            legacy?.Dispose();
+            stream.Dispose();
+            throw new IOException("Не удалось запустить канал управления приложением. Проверьте доступ к временным файлам.", exception);
+        }
     }
 
     public static async Task<bool> SendAsync(string dataPath, bool exit, CancellationToken cancellationToken = default)
@@ -43,6 +109,8 @@ public sealed class SingleInstanceService : IDisposable
         timeout.CancelAfter(TimeSpan.FromSeconds(exit ? 15 : 5));
         try
         {
+            if (!OperatingSystem.IsWindows())
+                return await UnixInstanceSocket.SendAsync(Identity(dataPath), exit, timeout.Token);
             await using var client = new NamedPipeClientStream(".", Identity(dataPath), PipeDirection.InOut,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             await client.ConnectAsync(timeout.Token);
@@ -51,6 +119,7 @@ public sealed class SingleInstanceService : IDisposable
             return await client.ReadAsync(response, timeout.Token) == 1 && response[0] == 1;
         }
         catch (IOException) { return false; }
+        catch (SocketException) { return false; }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return false; }
     }
 
@@ -60,16 +129,19 @@ public sealed class SingleInstanceService : IDisposable
         {
             try
             {
-                await using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1,
-                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                if (!OperatingSystem.IsWindows() && unixSocket is not null)
+                {
+                    await unixSocket.ServeOnceAsync(HandleRequestAsync, cancellation.Token);
+                    continue;
+                }
+                await using var server = CreatePipeServer();
                 await server.WaitForConnectionAsync(cancellation.Token);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(20));
                 var request = new byte[1];
                 if (await server.ReadAsync(request, timeout.Token) != 1)
                     continue;
-                var handler = request[0] switch { 1 => ActivateRequested, 2 => ExitRequested, _ => null };
-                var success = handler is not null && await handler();
+                var success = await HandleRequestAsync(request[0]);
                 await server.WriteAsync(new byte[] { success ? (byte)1 : (byte)0 }, timeout.Token);
             }
             catch (OperationCanceledException) { }
@@ -82,10 +154,25 @@ public sealed class SingleInstanceService : IDisposable
         }
     }
 
+    private async Task<bool> HandleRequestAsync(byte request)
+    {
+        var handler = request switch { 1 => ActivateRequested, 2 => ExitRequested, _ => null };
+        return handler is not null && await handler();
+    }
+
     public void Dispose()
     {
         cancellation.Cancel();
-        lease.Dispose();
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+                unixSocket?.Dispose();
+        }
+        finally
+        {
+            legacyLease?.Dispose();
+            lease.Dispose();
+        }
         // The lock file stays in place to avoid unlink/recreate races between processes.
     }
 }

@@ -9,9 +9,11 @@ public sealed class StartupErrorWindow : Window
 {
     private bool recovered;
     public void CloseAfterRecovery() { recovered = true; Close(); }
-    public StartupErrorWindow(string databasePath, Exception error, Func<Task> retry, Action exit, bool databaseError = true)
+    public StartupErrorWindow(string databasePath, Exception error, Func<Task> retry, Action exit,
+        bool databaseError = true, bool communicationError = false)
     {
-        Title = databaseError ? "Не удалось открыть данные" : "Не удалось открыть главное окно";
+        Title = communicationError ? "Не удалось запустить приложение" :
+            databaseError ? "Не удалось открыть данные" : "Не удалось открыть главное окно";
         Width = 640;
         SizeToContent = SizeToContent.Height;
         CanResize = false;
@@ -21,6 +23,7 @@ public sealed class StartupErrorWindow : Window
         {
             retryButton.IsEnabled = false;
             try { await retry(); }
+            catch (Exception exception) { detail.Text = exception.Message; }
             finally { retryButton.IsEnabled = true; }
         };
         var folderButton = new Button { Content = "Открыть папку" };
@@ -42,8 +45,12 @@ public sealed class StartupErrorWindow : Window
             Margin = new Thickness(24), Spacing = 16,
             Children =
             {
-                new TextBlock { Text = databaseError ? "Не удалось открыть базу данных" : "Не удалось открыть главное окно", FontSize = 24 },
-                new TextBlock { Text = databaseError ? "Приложение не заменяло базу пустой. Проверьте доступ к файлу и свободное место на диске." : "Данные загружены, но интерфейс не удалось создать. Повторите открытие окна. Это не означает повреждение базы.", TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                new TextBlock { Text = communicationError ? "Не удалось запустить канал управления" :
+                    databaseError ? "Не удалось открыть базу данных" : "Не удалось открыть главное окно", FontSize = 24 },
+                new TextBlock { Text = communicationError ? "Учёт времени не запущен. Проверьте доступ к временным файлам и повторите попытку." :
+                    databaseError ? "Приложение не заменяло базу пустой. Проверьте доступ к файлу и свободное место на диске." :
+                    "Данные загружены, но интерфейс не удалось создать. Повторите открытие окна. Это не означает повреждение базы.",
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap },
                 new SelectableTextBlock { Text = databasePath, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
                 detail,
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { retryButton, folderButton, exitButton } }

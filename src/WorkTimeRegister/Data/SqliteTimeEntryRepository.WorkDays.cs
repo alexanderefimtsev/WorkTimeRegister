@@ -14,8 +14,19 @@ public sealed partial class SqliteTimeEntryRepository
         var settings = await ReadSettingsAsync(connection, transaction);
         var openDay = await ReadOpenDayAsync(connection, transaction);
         var runtime = await ReadRuntimeAsync(connection, transaction);
+        if (request.Operation == WorkDayOperation.Inspect)
+        {
+            var confirmedAt = runtime.RecoveryFrom ?? runtime.LastSeenAt ?? request.Now;
+            var confirmedZone = openDay is null ? request.TimeZone : ResolveTimeZone(openDay.TimeZoneId, request.TimeZone);
+            var confirmedDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(confirmedAt, confirmedZone).DateTime);
+            var confirmedDay = openDay ?? await ReadDayAsync(connection, transaction, confirmedDate);
+            var frozen = new WorkDaySnapshot(confirmedDay, confirmedDate,
+                await ReadSummaryAsync(connection, transaction, confirmedDay, confirmedAt), settings);
+            await transaction.CommitAsync();
+            return frozen;
+        }
         if (runtime.LastSeenAt > request.Now && request.Operation is not (WorkDayOperation.Suspend or WorkDayOperation.Resume))
-            throw new InvalidOperationException("Время компьютера раньше последней сохранённой активности. Проверьте дату и время.");
+            throw new ClockConflictException(request.Now, runtime.LastSeenAt.Value);
         if (request.Operation is WorkDayOperation.Suspend or WorkDayOperation.Resume && IsStalePowerEvent(request, runtime))
         {
             var unchangedDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(
@@ -251,7 +262,7 @@ public sealed partial class SqliteTimeEntryRepository
         if (day.IsOpen)
             return;
         if (day.EndedAt > at)
-            throw new InvalidOperationException("Время компьютера раньше последнего завершения рабочего дня.");
+            throw new ClockConflictException(at, day.EndedAt.Value);
         await ExecuteSqlAsync(connection, transaction,
             "UPDATE WorkDays SET StartedAt=COALESCE(StartedAt,$at), EndedAt=NULL, LastMode=$mode, WasPaused=$paused, CloseReason=NULL WHERE Id=$id;",
             ("$at", Format(at)), ("$mode", (int)mode), ("$paused", paused ? 1 : 0), ("$id", day.Id));

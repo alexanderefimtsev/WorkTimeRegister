@@ -30,6 +30,7 @@ public sealed class DockIconCoordinator : IDisposable
         if (e.PropertyName is nameof(MainWindowViewModel.CurrentPeriod)
             or nameof(MainWindowViewModel.ActiveKind)
             or nameof(MainWindowViewModel.IsPaused)
+            or nameof(MainWindowViewModel.HasClockConflict)
             or nameof(MainWindowViewModel.TotalWork)
             or nameof(MainWindowViewModel.TotalBreak))
             Update();
@@ -39,7 +40,7 @@ public sealed class DockIconCoordinator : IDisposable
     {
         var presentation = DockIconPresentation.Create(
             viewModel.ActiveKind,
-            viewModel.IsPaused,
+            viewModel.IsPaused || viewModel.HasClockConflict,
             viewModel.CurrentPeriodValue,
             viewModel.TotalWork,
             viewModel.TotalBreak);

@@ -10,6 +10,7 @@ public sealed class LogWindowViewModel : ViewModelBase
     private readonly ITimeEntryRepository repository;
     private readonly TimeProvider timeProvider;
     private readonly ActionLogJsonService jsonService;
+    private readonly Func<bool> canImport;
     private DateTimeOffset? from;
     private DateTimeOffset? to;
     private string? errorMessage;
@@ -18,11 +19,12 @@ public sealed class LogWindowViewModel : ViewModelBase
     public LogWindowViewModel(
         ITimeEntryRepository repository,
         TimeProvider timeProvider,
-        ActionLogJsonService? jsonService = null)
+        ActionLogJsonService? jsonService = null, Func<bool>? canImport = null)
     {
         this.repository = repository;
         this.timeProvider = timeProvider;
         this.jsonService = jsonService ?? new ActionLogJsonService();
+        this.canImport = canImport ?? (() => true);
         var today = timeProvider.GetLocalNow().Date;
         from = new DateTimeOffset(today, timeProvider.GetLocalNow().Offset);
         to = from;
@@ -67,6 +69,8 @@ public sealed class LogWindowViewModel : ViewModelBase
     public string? StatusMessage { get => statusMessage; private set { statusMessage = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasStatus)); } }
     public bool HasStatus => !string.IsNullOrWhiteSpace(StatusMessage);
     public ObservableCollection<ActionLogRowViewModel> Entries { get; } = [];
+    public bool CanImport => canImport();
+    public void RefreshImportAvailability() => OnPropertyChanged(nameof(CanImport));
     public AsyncCommand ApplyFilterCommand { get; }
 
     public void ReportFileError(string operation, Exception exception)
@@ -96,6 +100,11 @@ public sealed class LogWindowViewModel : ViewModelBase
 
     public async Task<bool> ImportAsync(Stream stream)
     {
+        if (!CanImport)
+        {
+            ErrorMessage = "Импорт недоступен, пока системное время не исправлено.";
+            return false;
+        }
         try
         {
             var records = await jsonService.ImportAsync(stream);

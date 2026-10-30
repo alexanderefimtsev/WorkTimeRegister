@@ -171,6 +171,13 @@
     </StackPanel>
 
     <StackPanel Grid.Row="3" Spacing="6">
+    <Border IsVisible="{Binding HasClockConflict}" Background="#25F59E0B" CornerRadius="8" Padding="12">
+      <StackPanel Spacing="8">
+        <TextBlock Text="Системное время изменилось" FontWeight="SemiBold" />
+        <TextBlock Text="{Binding ClockConflictMessage}" TextWrapping="Wrap" />
+        <Button Content="Проверить время" Click="RetryClock" HorizontalAlignment="Left" />
+      </StackPanel>
+    </Border>
     <Border IsVisible="{Binding HasError}"
             Background="#25EF4444" CornerRadius="8" Padding="12">
       <StackPanel Spacing="6">

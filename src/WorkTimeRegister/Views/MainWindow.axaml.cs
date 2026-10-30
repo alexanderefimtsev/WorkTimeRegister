@@ -16,6 +16,12 @@ public sealed partial class MainWindow : Window
 
     private void RetryIntegrations(object? sender, RoutedEventArgs e) => RetryIntegrationsRequested?.Invoke();
 
+    private async void RetryClock(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+            await viewModel.RetryClockAsync();
+    }
+
     private async void RetryPowerEvents(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel viewModel)
@@ -52,8 +58,16 @@ public sealed partial class MainWindow : Window
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        var window = new ActionLogWindow { DataContext = viewModel.CreateLogViewModel() };
-        await window.ShowDialog(this);
+        var logViewModel = viewModel.CreateLogViewModel();
+        var window = new ActionLogWindow { DataContext = logViewModel };
+        void RefreshImport(object? _, System.ComponentModel.PropertyChangedEventArgs change)
+        {
+            if (change.PropertyName == nameof(MainWindowViewModel.HasClockConflict))
+                logViewModel.RefreshImportAvailability();
+        }
+        viewModel.PropertyChanged += RefreshImport;
+        try { await window.ShowDialog(this); }
+        finally { viewModel.PropertyChanged -= RefreshImport; }
     }
 
     private async void OpenSettings(object? sender, RoutedEventArgs e)

@@ -52,20 +52,42 @@ public sealed partial class App : Application
                     _activatableLifetime.Activated -= ApplicationActivated;
 
                 DisposeDesktopServices();
+                Program.ReleaseRetriedInstance();
             };
-            if (Program.Instance is { } instance)
+            if (Program.StartupFailure is { } startupFailure)
             {
-                instance.ActivateRequested = async () => await Dispatcher.UIThread.InvokeAsync(() =>
+                desktop.MainWindow = new StartupErrorWindow(Program.DatabasePath, startupFailure,
+                    async () =>
+                    {
+                        if (!Program.RetryInstance())
+                            throw Program.StartupFailure!;
+                        WireInstance();
+                        await InitializeDesktopAsync(desktop);
+                    },
+                    () => { exitApproved = true; desktop.Shutdown(); },
+                    databaseError: false, communicationError: true);
+            }
+            else
+            {
+                WireInstance();
+                _ = InitializeDesktopAsync(desktop);
+            }
+        }
+
+        base.OnFrameworkInitializationCompleted();
+    }
+
+    private void WireInstance()
+    {
+        if (Program.Instance is { } instance)
+        {
+            instance.ActivateRequested = async () => await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     ShowMainWindow();
                     return true;
                 });
-                instance.ExitRequested = async () => await Dispatcher.UIThread.InvokeAsync(() => RequestExitAsync(offerForce: false));
-            }
-            _ = InitializeDesktopAsync(desktop);
+            instance.ExitRequested = async () => await Dispatcher.UIThread.InvokeAsync(() => RequestExitAsync(offerForce: false));
         }
-
-        base.OnFrameworkInitializationCompleted();
     }
 
     private async Task InitializeDesktopAsync(IClassicDesktopStyleApplicationLifetime desktop)

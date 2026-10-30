@@ -67,6 +67,7 @@
 - Keep discussions of project analysis, audits, and recommendations in `ANALYSIS.md` at the repository root.
 - Before a new review, read the current `ANALYSIS.md` from the repository and take previous sessions into account.
 - Add new reviews, responses, agreed decisions, implementation results, and verification results as separate sessions identifying the author, date, and reviewed version or commit.
+- After each code fix based on recommendations in `ANALYSIS.md`, add a separate session listing the recommendations addressed, the changes made, and the verification results.
 - Preserve previous sessions and their attribution; do not retrospectively rewrite another author's conclusions. Record clarifications and objections in a new session.
 - Distinguish proposals from agreed requirements, and planned changes from changes that have been implemented and verified.
 - Briefly report the outcome to the user in chat and link to the relevant entry in `ANALYSIS.md`.

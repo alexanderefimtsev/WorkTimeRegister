@@ -277,8 +277,65 @@ public sealed class ReliabilityRegressionTests
         await c.Start();
         var checkpoint = await c.Scalar("SELECT LastSeenAt FROM ApplicationState;");
         c.Clock.Now -= TimeSpan.FromMinutes(5);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => c.Run(WorkDayOperation.Refresh));
+        var conflict = await Assert.ThrowsAsync<ClockConflictException>(() => c.Run(WorkDayOperation.Refresh));
+        Assert.Equal(c.Clock.Now, conflict.CurrentAt);
+        Assert.Equal(DateTimeOffset.Parse((string)checkpoint!), conflict.SavedAt);
+        var frozen = await c.Run(WorkDayOperation.Inspect);
+        Assert.Equal(TimeSpan.Zero, frozen.Summary.TotalWork);
         Assert.Equal(checkpoint, await c.Scalar("SELECT LastSeenAt FROM ApplicationState;"));
+    }
+
+    [Fact]
+    public async Task BackwardClock_OpensReadOnlyWindowAndResumesThroughRecovery()
+    {
+        await using var c = await Context.Create();
+        await c.Start();
+        await c.Alive(TimeSpan.FromMinutes(10));
+        var confirmed = c.Clock.Now;
+        c.Clock.Now -= TimeSpan.FromHours(1);
+        using var vm = new MainWindowViewModel(c.Repository, new TimeSummaryCalculator(), c.Clock, Guid.NewGuid());
+        await vm.Initialization;
+        Assert.True(vm.HasLoaded);
+        Assert.True(vm.HasClockConflict);
+        Assert.False(vm.IsReady);
+        Assert.Equal(TimeSpan.FromMinutes(10), vm.TotalWork);
+        Assert.Contains("последняя сохранённая отметка", vm.ClockConflictMessage);
+        Assert.False(vm.StartBreakCommand.CanExecute(null));
+        Assert.False(await vm.RetryClockAsync());
+        Assert.True(vm.HasClockConflict);
+        var log = vm.CreateLogViewModel();
+        Assert.False(log.CanImport);
+        await using var exported = new MemoryStream();
+        Assert.True(await log.ExportAsync(exported));
+        c.Clock.Now = confirmed.AddMinutes(1);
+        Assert.True(await vm.RetryClockAsync());
+        Assert.False(vm.HasClockConflict);
+        Assert.True(log.CanImport);
+        Assert.NotNull(vm.PendingRecovery);
+        Assert.Equal(TimeSpan.FromMinutes(10), vm.TotalWork);
+        Assert.True(await vm.ResolveRecoveryAsync(RecoveryChoice.Exclude));
+        Assert.True(vm.IsPaused);
+    }
+
+    [Fact]
+    public async Task BackwardClock_DuringRunningSessionFreezesTotalsUntilClockIsFixed()
+    {
+        await using var c = await Context.Create();
+        using var vm = new MainWindowViewModel(c.Repository, new TimeSummaryCalculator(), c.Clock);
+        await vm.Initialization;
+        await vm.ToggleWorkDayAsync();
+        await c.AliveViewModel(vm, TimeSpan.FromMinutes(5));
+        var confirmed = c.Clock.Now;
+        c.Clock.Now -= TimeSpan.FromMinutes(2);
+        await vm.RefreshAsync();
+        Assert.True(vm.HasClockConflict);
+        Assert.Equal(TimeSpan.FromMinutes(5), vm.TotalWork);
+        Assert.False(vm.ToggleWorkDayCommand.CanExecute(null));
+        Assert.False(await vm.RetryClockAsync());
+        c.Clock.Now = confirmed.AddSeconds(1);
+        Assert.True(await vm.RetryClockAsync());
+        Assert.True(vm.IsReady);
+        Assert.Equal(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1), vm.TotalWork);
     }
 
     [Fact]

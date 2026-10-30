@@ -38,8 +38,9 @@ public sealed class SqliteTimeEntryRepositoryTests
                 TimeSpan.FromMinutes(45)));
 
             var updatedEntry = await repository.GetActiveEntryAsync();
-            var transfers = await repository.GetTransfersAsync(now.Date, now.Date.AddDays(1));
-            var log = await repository.GetActionLogAsync(now.Date, now.Date.AddDays(1));
+            var dayStart = new DateTimeOffset(now.Date, now.Offset);
+            var transfers = await repository.GetTransfersAsync(dayStart, dayStart.AddDays(1));
+            var log = await repository.GetActionLogAsync(dayStart, dayStart.AddDays(1));
 
             Assert.Equal(TimeSpan.FromMinutes(-15), updatedEntry!.CurrentPeriodAdjustment);
             Assert.Single(transfers);
@@ -86,7 +87,8 @@ public sealed class SqliteTimeEntryRepositoryTests
 
             var firstImportCount = await repository.ImportActionLogAsync(records);
             var secondImportCount = await repository.ImportActionLogAsync(records);
-            var log = await repository.GetActionLogAsync(now.Date, now.Date.AddDays(1));
+            var dayStart = new DateTimeOffset(now.Date, now.Offset);
+            var log = await repository.GetActionLogAsync(dayStart, dayStart.AddDays(1));
 
             Assert.Equal(2, firstImportCount);
             Assert.Equal(0, secondImportCount);

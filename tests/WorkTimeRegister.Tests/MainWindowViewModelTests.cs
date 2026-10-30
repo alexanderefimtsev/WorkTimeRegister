@@ -89,7 +89,8 @@ public sealed class MainWindowViewModelTests
             viewModel.ModeSwitchCommand.Execute(null);
             await WaitForAsync(() => viewModel.ActiveKind == TimeEntryKind.Work);
 
-            var log = await repository.GetActionLogAsync(now.Date, now.Date.AddDays(1));
+            var dayStart = new DateTimeOffset(now.Date, now.Offset);
+            var log = await repository.GetActionLogAsync(dayStart, dayStart.AddDays(1));
             Assert.Equal(
                 ["Окончание перерыва", "Начало перерыва", "Начало рабочего дня"],
                 log.Select(record => record.Action));

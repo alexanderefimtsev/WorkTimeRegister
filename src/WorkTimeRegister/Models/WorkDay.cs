@@ -56,7 +56,8 @@ public enum WorkDayOperation
     AdjustCurrentPeriod,
     ResolveRecovery,
     Suspend,
-    Resume
+    Resume,
+    Inspect
 }
 
 public sealed record WorkDayRequest(

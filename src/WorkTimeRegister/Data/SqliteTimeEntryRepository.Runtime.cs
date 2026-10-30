@@ -113,7 +113,7 @@ public sealed partial class SqliteTimeEntryRepository
         var knownSleepBoundary = state.RecoveryKind == RecoveryOrigin.MissedUpdates && state.SleepStartedAt.HasValue;
         var to = request.Operation == WorkDayOperation.Initialize && !knownSleepBoundary ? request.Now : state.RecoveryTo ?? request.Now;
         if (to < from.Value)
-            throw new InvalidOperationException("Время компьютера раньше последней сохранённой активности. Проверьте дату и время.");
+            throw new ClockConflictException(request.Now, from.Value);
         var origin = state.RecoveryKind ?? (interrupted ? RecoveryOrigin.Crash : RecoveryOrigin.MissedUpdates);
         await ExecuteSqlAsync(connection, transaction,
             "UPDATE ApplicationState SET RecoveryFrom=$from, RecoveryTo=$to, RecoveryKind=$kind, SessionId=$session WHERE Id=1;",

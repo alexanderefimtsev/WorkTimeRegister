@@ -23,7 +23,7 @@
               VerticalAlignment="Bottom" />
       <Button x:Name="ExportJsonButton" Content="Экспорт JSON" Click="ExportJsonClicked"
               VerticalAlignment="Bottom" />
-      <Button x:Name="ImportJsonButton" Content="Импорт JSON" Click="ImportJsonClicked"
+      <Button x:Name="ImportJsonButton" Content="Импорт JSON" Click="ImportJsonClicked" IsEnabled="{Binding CanImport}"
               VerticalAlignment="Bottom" />
     </StackPanel>
 

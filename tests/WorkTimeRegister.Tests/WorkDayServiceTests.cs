@@ -140,10 +140,12 @@ public sealed class WorkDayServiceTests
             Assert.Null(today.Day);
             Assert.Null(today.Summary.ActiveKind);
         }
-        var entries = await context.Repository.GetEntriesAsync(start.Date, start.Date.AddDays(1));
+        var previousStart = WorkDayService.Boundary(new DateOnly(2026, 10, 28), context.Clock.LocalTimeZone);
+        var previousEnd = WorkDayService.Boundary(new DateOnly(2026, 10, 29), context.Clock.LocalTimeZone);
+        var entries = await context.Repository.GetEntriesAsync(previousStart, previousEnd);
         Assert.Equal(yesterday.Day!.DayEnd, entries.Last().EndedAt);
         Assert.All(entries, entry => Assert.True(entry.EndedAt <= yesterday.Day.DayEnd));
-        var pauses = await context.Repository.GetPausesAsync(start.Date, start.Date.AddDays(1));
+        var pauses = await context.Repository.GetPausesAsync(previousStart, previousEnd);
         var previousSummary = new TimeSummaryCalculator().Calculate(entries, yesterday.Day!.DayStart,
             yesterday.Day.DayEnd, context.Clock.GetUtcNow(), pauses: pauses);
         Assert.Equal(TimeSpan.FromSeconds(paused ? 5 : 10), mode == TimeEntryKind.Work ? previousSummary.TotalWork : previousSummary.TotalBreak);

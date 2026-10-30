@@ -21,6 +21,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool disposed;
     private string? errorMessage;
     private RecoveryInfo? pendingRecovery;
+    private ClockConflictException? clockConflict;
     private readonly Queue<(bool Sleeping, DateTimeOffset At, Guid Cycle)> powerEvents = new();
     private Guid powerCycle;
     private bool receivingSleep;
@@ -43,7 +44,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         TogglePauseCommand = new AsyncCommand(TogglePauseAsync, () => IsReady && IsWorkDayOpen);
         EndWorkCommand = new AsyncCommand(() => RunActionAsync(WorkDayOperation.EndDay), () => IsReady && IsWorkDayOpen);
         ToggleWorkDayCommand = new AsyncCommand(ToggleWorkDayAsync, () => IsReady);
-        timer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Normal, async (_, _) => await RefreshAsync());
+        timer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Normal, async (_, _) =>
+        {
+            if (clockConflict is not null)
+                OnPropertyChanged(nameof(ClockConflictMessage));
+            else
+                await RefreshAsync();
+        });
         Initialization = InitializeCoreAsync();
     }
 
@@ -51,13 +58,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string WorkTime => Format(TotalWork);
     public string BreakTime => Format(TotalBreak);
     public string CurrentPeriod => Format(CurrentPeriodValue);
-    public string CurrentPeriodTitle => pendingRecovery is not null ? "Требуется восстановление" : IsPaused ? "На паузе…" : ActiveKind switch
+    public string CurrentPeriodTitle => clockConflict is not null ? "Проверьте системные часы" :
+        pendingRecovery is not null ? "Требуется восстановление" : IsPaused ? "На паузе…" : ActiveKind switch
     {
         TimeEntryKind.Work => "Работаю…",
         TimeEntryKind.Break => "На перерыве…",
         _ => workDay?.StartedAt is null ? "Рабочий день не начат" : "Рабочий день завершён"
     };
-    public string Status => pendingRecovery is not null ? "Выберите способ учёта неизвестного интервала" : IsPaused ? $"На паузе: {ModeName(ActiveKind!.Value)}" : ActiveKind switch
+    public string Status => clockConflict is not null ? "Учёт приостановлен до исправления часов" :
+        pendingRecovery is not null ? "Выберите способ учёта неизвестного интервала" : IsPaused ? $"На паузе: {ModeName(ActiveKind!.Value)}" : ActiveKind switch
     {
         TimeEntryKind.Work => "Сейчас идёт работа",
         TimeEntryKind.Break => "Сейчас идёт перерыв",
@@ -79,9 +88,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
     public bool HasIntegrationWarning => !string.IsNullOrWhiteSpace(IntegrationWarning);
     public bool HasPendingPowerEvents => powerEvents.Count > 0;
+    public bool HasClockConflict => clockConflict is not null;
+    public string ClockConflictMessage => clockConflict is null ? "" :
+        $"Сейчас на компьютере {LocalTime(timeProvider.GetUtcNow()):dd.MM.yyyy HH:mm:ss}, " +
+        $"последняя сохранённая отметка — {LocalTime(clockConflict.SavedAt):dd.MM.yyyy HH:mm:ss}. " +
+        "Итоги показаны на последнюю подтверждённую отметку. Исправьте часы и нажмите «Проверить время».";
     public TimeZoneInfo LocalTimeZone => timeProvider.LocalTimeZone;
     public WorkDaySettings Settings => settings;
-    public bool IsReady => isInitialized && !isExiting && !disposed && pendingRecovery is null;
+    public bool IsReady => isInitialized && !isExiting && !disposed && pendingRecovery is null && clockConflict is null;
     public bool HasLoaded => isInitialized;
     public RecoveryInfo? PendingRecovery => pendingRecovery;
     public bool IsWorkDayOpen => workDay?.IsOpen == true;
@@ -105,7 +119,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool CanReduceBreak => IsReady && TotalBreak > TimeSpan.Zero;
     public bool CanReduceCurrentPeriod => CanAdjustCurrentPeriod && CurrentPeriodValue > TimeSpan.Zero;
 
-    public LogWindowViewModel CreateLogViewModel() => new(repository, timeProvider);
+    public LogWindowViewModel CreateLogViewModel() => new(repository, timeProvider, canImport: () => !HasClockConflict);
+
+    public async Task<bool> RetryClockAsync()
+    {
+        await Initialization;
+        await stateLock.WaitAsync();
+        try
+        {
+            if (clockConflict is null || isExiting || disposed)
+                return false;
+            var snapshot = await workDayService.ExecuteAsync(WorkDayOperation.Initialize);
+            clockConflict = null;
+            Apply(snapshot);
+            OnPropertyChanged(nameof(HasClockConflict));
+            OnPropertyChanged(nameof(ClockConflictMessage));
+            ErrorMessage = null;
+            if (pendingRecovery is null)
+                timer.Start();
+            else
+                timer.Stop();
+            return true;
+        }
+        catch (ClockConflictException exception)
+        {
+            clockConflict = exception;
+            OnPropertyChanged(nameof(ClockConflictMessage));
+            return false;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Не удалось проверить время: {exception.Message}";
+            return false;
+        }
+        finally { stateLock.Release(); }
+    }
 
     public Task<string?> TransferAsync(TimeEntryKind source, TimeSpan amount) =>
         AdjustTimeAsync(TimeAdjustmentOperation.Transfer, source, amount);
@@ -154,7 +202,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await stateLock.WaitAsync();
         try
         {
-            if (!isInitialized || isExiting || disposed)
+            if (!isInitialized || isExiting || disposed || clockConflict is not null)
                 return;
             if (pendingRecovery is not null && pendingRecovery.Origin != RecoveryOrigin.MissedUpdates)
                 return;
@@ -224,6 +272,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return true;
             if (!isInitialized)
                 throw new InvalidOperationException("Данные не загружены. Завершение рабочего дня не подтверждено.");
+            if (clockConflict is not null)
+                throw new InvalidOperationException("Сначала исправьте системное время и повторите проверку.");
             if (pendingRecovery is not null)
                 throw new InvalidOperationException("Сначала выберите способ учёта неизвестного интервала.");
             if (!await DrainPowerEventsAsync() || pendingRecovery is not null)
@@ -235,6 +285,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (pendingRecovery is not null)
                 throw new InvalidOperationException("Сначала выберите способ учёта неизвестного интервала.");
             return true;
+        }
+        catch (ClockConflictException exception)
+        {
+            isExiting = false;
+            await EnterClockConflictAsync(exception);
+            return false;
         }
         catch (Exception exception)
         {
@@ -258,6 +314,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Apply(snapshot);
             if (pendingRecovery is null)
                 timer.Start();
+        }
+        catch (ClockConflictException exception)
+        {
+            await EnterClockConflictAsync(exception);
+            isInitialized = true;
+            timer.Start();
         }
         catch (Exception exception)
         {
@@ -291,6 +353,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ErrorMessage = null;
             return pendingRecovery is null;
         }
+        catch (ClockConflictException exception)
+        {
+            await EnterClockConflictAsync(exception);
+            return false;
+        }
         catch (Exception exception)
         {
             ErrorMessage = $"Не удалось обновить рабочий день: {exception.Message}";
@@ -316,12 +383,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ErrorMessage = null;
             return null;
         }
+        catch (ClockConflictException exception)
+        {
+            await EnterClockConflictAsync(exception);
+            return exception.Message;
+        }
         catch (Exception exception)
         {
             ErrorMessage = $"Не удалось изменить время: {exception.Message}";
             return exception.Message;
         }
         finally { stateLock.Release(); }
+    }
+
+    private async Task EnterClockConflictAsync(ClockConflictException exception)
+    {
+        Apply(await workDayService.ExecuteAsync(WorkDayOperation.Inspect));
+        clockConflict = exception;
+        ErrorMessage = null;
+        OnPropertyChanged(nameof(HasClockConflict));
+        OnPropertyChanged(nameof(ClockConflictMessage));
+        OnPropertyChanged(nameof(CurrentPeriodTitle));
+        OnPropertyChanged(nameof(Status));
+        RefreshCommands();
+        timer.Start();
     }
 
     private void Apply(WorkDaySnapshot snapshot)
