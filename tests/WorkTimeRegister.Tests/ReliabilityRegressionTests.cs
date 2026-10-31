@@ -338,6 +338,71 @@ public sealed class ReliabilityRegressionTests
         Assert.Equal(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1), vm.TotalWork);
     }
 
+    [Theory]
+    [InlineData(TimeEntryKind.Work)]
+    [InlineData(TimeEntryKind.Break)]
+    public async Task BriefClockRollback_ResumesWhenClockReachesSavedCheckpoint(TimeEntryKind mode)
+    {
+        await using var c = await Context.Create();
+        using var vm = new MainWindowViewModel(c.Repository, new TimeSummaryCalculator(), c.Clock);
+        await vm.Initialization;
+        await vm.ToggleWorkDayAsync();
+        if (mode == TimeEntryKind.Break)
+        {
+            await c.Run(WorkDayOperation.StartBreak);
+            await vm.RefreshAsync();
+        }
+        for (var second = 0; second < 16; second++)
+        {
+            c.Clock.Now += TimeSpan.FromSeconds(1);
+            await vm.RefreshAsync();
+        }
+        c.Clock.Now -= TimeSpan.FromSeconds(5);
+        await vm.RefreshAsync();
+        Assert.True(vm.HasClockConflict);
+        Assert.False(vm.IsReady);
+        c.Clock.Now += TimeSpan.FromSeconds(3);
+        await vm.RefreshAsync();
+        Assert.True(vm.HasClockConflict);
+        c.Clock.Now += TimeSpan.FromSeconds(1);
+        await vm.RefreshAsync();
+        Assert.False(vm.HasClockConflict);
+        Assert.Null(vm.PendingRecovery);
+        Assert.True(vm.IsReady);
+        Assert.Equal(TimeSpan.FromSeconds(15), mode == TimeEntryKind.Work ? vm.TotalWork : vm.TotalBreak);
+        c.Clock.Now += TimeSpan.FromSeconds(1);
+        await vm.RefreshAsync();
+        Assert.Equal(TimeSpan.FromSeconds(16), mode == TimeEntryKind.Work ? vm.TotalWork : vm.TotalBreak);
+        await vm.ToggleWorkDayAsync();
+        Assert.False(vm.IsWorkDayOpen);
+        Assert.Equal(TimeSpan.FromSeconds(16), mode == TimeEntryKind.Work ? vm.TotalWork : vm.TotalBreak);
+    }
+
+    [Theory]
+    [InlineData(TimeEntryKind.Work)]
+    [InlineData(TimeEntryKind.Break)]
+    public async Task MissedUpdatesThreshold_AccountsForCheckpointAge(TimeEntryKind mode)
+    {
+        await using var c = await Context.Create();
+        await c.Start(mode);
+        c.Clock.Now += TimeSpan.FromSeconds(14);
+        Assert.Null((await c.Run(WorkDayOperation.Refresh)).Recovery);
+        c.Clock.Now += TimeSpan.FromSeconds(47);
+        var stillActive = await c.Run(WorkDayOperation.Refresh);
+        Assert.Null(stillActive.Recovery);
+        Assert.Equal(TimeSpan.FromSeconds(61), mode == TimeEntryKind.Work
+            ? stillActive.Summary.TotalWork : stillActive.Summary.TotalBreak);
+        c.Clock.Now += TimeSpan.FromSeconds(76);
+        var uncertain = await c.Run(WorkDayOperation.Refresh);
+        Assert.Equal(RecoveryOrigin.MissedUpdates, uncertain.Recovery!.Origin);
+        Assert.Equal(TimeSpan.FromSeconds(61), mode == TimeEntryKind.Work
+            ? uncertain.Summary.TotalWork : uncertain.Summary.TotalBreak);
+        var resolved = await c.Run(WorkDayOperation.ResolveRecovery);
+        Assert.True(resolved.Summary.IsPaused);
+        Assert.Equal(TimeSpan.FromSeconds(61), mode == TimeEntryKind.Work
+            ? resolved.Summary.TotalWork : resolved.Summary.TotalBreak);
+    }
+
     [Fact]
     public async Task RecoveryLog_UsesReadableLocalTime_AndKeepsCheckpointPrecision()
     {

@@ -28,7 +28,7 @@ internal static class Program
         {
             if (instance is null)
             {
-                if (SingleInstanceService.SendAsync(DatabasePath, exit: false).GetAwaiter().GetResult())
+                if (SingleInstanceService.ActivateExistingAsync(DatabasePath).GetAwaiter().GetResult())
                     return 0;
                 StartupFailure = new IOException("Другой экземпляр уже ведёт учёт, но связь с ним недоступна. Закройте его и повторите запуск.");
                 return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);

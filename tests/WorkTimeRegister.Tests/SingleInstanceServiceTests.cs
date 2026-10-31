@@ -87,4 +87,38 @@ public sealed class SingleInstanceServiceTests
         using var upgraded = SingleInstanceService.TryAcquire(path);
         Assert.NotNull(upgraded);
     }
+
+    [Fact]
+    public async Task Activation_RetriesWhileFirstInstanceFinishesStartup()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"Instance-{Guid.NewGuid():N}", "test.db");
+        using var first = SingleInstanceService.TryAcquire(path);
+        Assert.NotNull(first);
+        var activation = SingleInstanceService.ActivateExistingAsync(path, TestContext.Current.CancellationToken);
+        await Task.Delay(350, TestContext.Current.CancellationToken);
+        var received = 0;
+        first.ActivateRequested = () => { received++; return Task.FromResult(true); };
+        Assert.True(await activation);
+        Assert.Equal(1, received);
+    }
+
+    [Fact]
+    public void PersistentLease_PreventsDuplicateAfterTemporaryLocksAreRemoved()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+        var path = Path.Combine(Path.GetTempPath(), $"Instance-{Guid.NewGuid():N}", "test.db");
+        var identity = "WorkTimeRegister-" + Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(Path.GetFullPath(path))))[..24];
+        var user = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))))[..12];
+        var previousPath = Path.Combine("/tmp", "wtr-" + user, "lease-" + identity[^24..]);
+        var legacyPath = Path.Combine(Path.GetTempPath(), identity + ".lock");
+        using var first = SingleInstanceService.TryAcquire(path);
+        Assert.NotNull(first);
+        File.Delete(previousPath);
+        File.Delete(legacyPath);
+        Assert.Null(SingleInstanceService.TryAcquire(path));
+        Assert.True(SingleInstanceService.HasActiveLease(path));
+    }
 }

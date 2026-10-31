@@ -46,10 +46,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ToggleWorkDayCommand = new AsyncCommand(ToggleWorkDayAsync, () => IsReady);
         timer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Normal, async (_, _) =>
         {
-            if (clockConflict is not null)
-                OnPropertyChanged(nameof(ClockConflictMessage));
-            else
-                await RefreshAsync();
+            await RefreshAsync();
         });
         Initialization = InitializeCoreAsync();
     }
@@ -257,6 +254,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task RefreshAsync()
     {
         await Initialization;
+        if (clockConflict is { } conflict)
+        {
+            OnPropertyChanged(nameof(ClockConflictMessage));
+            if (timeProvider.GetUtcNow() >= conflict.SavedAt)
+                await RetryClockAsync();
+            return;
+        }
         if (!IsReady || HasPendingPowerEvents)
             return;
         await RunActionAsync(WorkDayOperation.Refresh, clearError: false);

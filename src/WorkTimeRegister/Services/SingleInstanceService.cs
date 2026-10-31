@@ -9,15 +9,17 @@ namespace WorkTimeRegister.Services;
 public sealed class SingleInstanceService : IDisposable
 {
     private readonly FileStream lease;
+    private readonly FileStream? previousLease;
     private readonly FileStream? legacyLease;
     private readonly CancellationTokenSource cancellation = new();
     private readonly string pipeName;
     private readonly UnixInstanceSocket? unixSocket;
     private readonly Task listener;
 
-    private SingleInstanceService(FileStream lease, FileStream? legacyLease, string pipeName)
+    private SingleInstanceService(FileStream lease, FileStream? previousLease, FileStream? legacyLease, string pipeName)
     {
         this.lease = lease;
+        this.previousLease = previousLease;
         this.legacyLease = legacyLease;
         this.pipeName = pipeName;
         if (OperatingSystem.IsWindows())
@@ -52,12 +54,15 @@ public sealed class SingleInstanceService : IDisposable
                 FileAccess.ReadWrite, FileShare.None);
             if (!OperatingSystem.IsWindows())
             {
+                using var previousProbe = new FileStream(UnixInstanceSocket.PreviousLockPath(Identity(dataPath)),
+                    FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                 using var legacyProbe = new FileStream(LegacyLockPath(Identity(dataPath)), FileMode.OpenOrCreate,
                     FileAccess.ReadWrite, FileShare.None);
             }
             return false;
         }
         catch (IOException) { return true; }
+        catch (UnauthorizedAccessException) { return true; }
     }
 
     public static async Task<bool> RequestShutdownAsync(string dataPath, CancellationToken cancellationToken = default)
@@ -77,27 +82,49 @@ public sealed class SingleInstanceService : IDisposable
     public static SingleInstanceService? TryAcquire(string dataPath)
     {
         var identity = Identity(dataPath);
-        var lockPath = LockPath(identity);
+        string lockPath;
+        string? previousLockPath;
+        try
+        {
+            lockPath = LockPath(identity);
+            previousLockPath = OperatingSystem.IsWindows() ? null : UnixInstanceSocket.PreviousLockPath(identity);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            throw new IOException("Нет доступа к каталогу блокировки приложения.", exception);
+        }
         FileStream stream;
+        FileStream? previous = null;
         FileStream? legacy = null;
         try
         {
             stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             if (!OperatingSystem.IsWindows())
             {
-                try { legacy = new FileStream(LegacyLockPath(identity), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+                try
+                {
+                    previous = new FileStream(previousLockPath!, FileMode.OpenOrCreate,
+                        FileAccess.ReadWrite, FileShare.None);
+                    legacy = new FileStream(LegacyLockPath(identity), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                }
                 catch
                 {
+                    previous?.Dispose();
                     stream.Dispose();
                     throw;
                 }
             }
         }
         catch (IOException) { return null; }
-        try { return new SingleInstanceService(stream, legacy, identity); }
+        catch (UnauthorizedAccessException exception)
+        {
+            throw new IOException("Нет доступа к файлу блокировки приложения.", exception);
+        }
+        try { return new SingleInstanceService(stream, previous, legacy, identity); }
         catch (Exception exception)
         {
             legacy?.Dispose();
+            previous?.Dispose();
             stream.Dispose();
             throw new IOException("Не удалось запустить канал управления приложением. Проверьте доступ к временным файлам.", exception);
         }
@@ -121,6 +148,26 @@ public sealed class SingleInstanceService : IDisposable
         catch (IOException) { return false; }
         catch (SocketException) { return false; }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return false; }
+    }
+
+    public static async Task<bool> ActivateExistingAsync(string dataPath, CancellationToken cancellationToken = default)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attempt.CancelAfter(TimeSpan.FromMilliseconds(500));
+            try
+            {
+                if (await SendAsync(dataPath, exit: false, attempt.Token))
+                    return true;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+            if (!HasActiveLease(dataPath))
+                return false;
+            await Task.Delay(100, cancellationToken);
+        }
+        return false;
     }
 
     private async Task ListenAsync()
@@ -171,6 +218,7 @@ public sealed class SingleInstanceService : IDisposable
         finally
         {
             legacyLease?.Dispose();
+            previousLease?.Dispose();
             lease.Dispose();
         }
         // The lock file stays in place to avoid unlink/recreate races between processes.

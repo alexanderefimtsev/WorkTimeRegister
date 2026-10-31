@@ -38,6 +38,14 @@ internal sealed class UnixInstanceSocket : IDisposable
 
     internal static string LockPath(string identity)
     {
+        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "WorkTimeRegister", "instance-locks");
+        Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return Path.Combine(directory, "lease-" + identity[^24..]);
+    }
+
+    internal static string PreviousLockPath(string identity)
+    {
         EnsureDirectory();
         return Path.Combine(SocketDirectory(), "lease-" + identity[^24..]);
     }
@@ -45,15 +53,22 @@ internal sealed class UnixInstanceSocket : IDisposable
     private static void EnsureDirectory()
     {
         var directory = SocketDirectory();
-        Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        var info = new DirectoryInfo(directory);
-        var mode = File.GetUnixFileMode(directory);
-        if (info.LinkTarget is not null ||
-            (mode & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
-                     UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0 ||
-            (mode & (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)) !=
-            (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute))
-            throw new IOException("Каталог канала связи имеет небезопасные права доступа.");
+        try
+        {
+            Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var info = new DirectoryInfo(directory);
+            var mode = File.GetUnixFileMode(directory);
+            if (info.LinkTarget is not null ||
+                (mode & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                         UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0 ||
+                (mode & (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)) !=
+                (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute))
+                throw new IOException("Каталог канала связи имеет небезопасные права доступа.");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            throw new IOException("Нет доступа к каталогу канала связи. Проверьте его владельца и права доступа.", exception);
+        }
     }
 
     private static string SocketPath(string identity) => Path.Combine(SocketDirectory(), "ipc-" + identity[^24..]);

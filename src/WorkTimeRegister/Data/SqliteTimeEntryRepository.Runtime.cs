@@ -6,6 +6,8 @@ namespace WorkTimeRegister.Data;
 public sealed partial class SqliteTimeEntryRepository
 {
     private const int SchemaVersion = 3;
+    private static readonly TimeSpan CheckpointInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan MissedUpdatesThreshold = TimeSpan.FromSeconds(60);
 
     private static async Task ValidateSchemaVersionAsync(SqliteConnection connection)
     {
@@ -100,7 +102,7 @@ public sealed partial class SqliteTimeEntryRepository
         var interrupted = request.Operation == WorkDayOperation.Initialize && state.IsRunning &&
                           state.SessionId != request.SessionId.ToString();
         var missedUpdates = !interrupted && settings.PauseDuringSleep && state.SleepStartedAt is null &&
-            state.LastSeenAt.HasValue && request.Now - state.LastSeenAt.Value > TimeSpan.FromSeconds(60) &&
+            state.LastSeenAt.HasValue && request.Now - state.LastSeenAt.Value > MissedUpdatesThreshold + CheckpointInterval &&
             request.Operation != WorkDayOperation.ResolveRecovery;
         if (missedUpdates)
         {
@@ -161,7 +163,7 @@ public sealed partial class SqliteTimeEntryRepository
         WorkDayRequest request, RuntimeState state)
     {
         if (request.Operation == WorkDayOperation.Refresh && state.LastSeenAt.HasValue &&
-            request.Now >= state.LastSeenAt.Value && request.Now - state.LastSeenAt.Value < TimeSpan.FromSeconds(15))
+            request.Now >= state.LastSeenAt.Value && request.Now - state.LastSeenAt.Value < CheckpointInterval)
             return;
         await ExecuteSqlAsync(connection, transaction,
             "UPDATE ApplicationState SET SessionId=$session, LastSeenAt=MAX(COALESCE(LastSeenAt,$at),$at), IsRunning=$running WHERE Id=1;",
