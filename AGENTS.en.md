@@ -20,7 +20,7 @@
 
 - Use a modern, concise C# style consistent with the existing codebase.
 - Prefer `var` for local variables when the type is obvious from the right-hand expression.
-- Write C# code comments in English.
+- Do not write comments in code.
 - Preserve the original language of file, class, method, endpoint, and configuration key names; do not translate them.
 
 # User interface style
