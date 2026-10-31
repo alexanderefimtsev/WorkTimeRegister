@@ -1,47 +1,35 @@
 ---
 name: investigate
-description: "Разбор ошибки или неверных цифр в WorkTimeRegister по доказательствам: каждое утверждение со ссылкой на код, прогон или строку базы, воспроизведение тестом на данных этого случая, работа только с копией базы, причина и предложенный фикс без реализации. Вызывается пользователем: $investigate."
+description: "Evidence-based WorkTimeRegister bug investigation: every claim cited, reproduced by a test, user DB read only as a copy, cause and proposed fix without implementing it. Invoke with $investigate."
 ---
 
-# Разбор ошибки в WorkTimeRegister
+# investigate
 
-Канон проекта: `AGENTS.md`. SQL для разбора дня в `sqlite`, тесты для воспроизведения по `cs-tests`.
+## Rules
 
-## Правила
+1. Every claim cites evidence: `file:line` at a named commit, command output, DB or log row. Label guesses as guesses.
+2. Confirm code reading by a run: a reproducing test or a run on a DB copy. List what was not run.
+3. Investigate the actual case: that DB, day, app version, OS and time zone.
+4. A current row is not the value at event time: `WorkDays` and `ApplicationState` are overwritten; `ActionLog` keeps per-action snapshots; `*.bak` files keep pre-migration state.
+5. A missing row does not prove the event did not happen; check every write path.
+6. "Fixed in version X?": `git merge-base --is-ancestor <fix> <version>` plus the code, not dates.
+7. Conflicting sources: stop, name both, check a third.
+8. Report failures and partial results explicitly.
 
-1. **Каждое утверждение с доказательством**: `файл:строка` на названном коммите, вывод команды, строка базы или журнала. Без доказательства утверждение не пишется. Предположение называется предположением в том же предложении.
-2. **Код подтверждается прогоном.** Вывод из чтения кода проверяется тестом, который воспроизводит сценарий, или запуском на копии базы. Всё, что прогоном не проверено, перечисляется отдельным списком, как «Что запуском не проверено» в сессии 8.
-3. **Разбирается конкретный случай**: та база, тот день, та версия программы, ОС и часовой пояс, на которых ошибка случилась.
-4. **Текущее значение строки не равно значению в момент события.** `WorkDays` и `ApplicationState` перезаписываются. Что было в момент действия, показывают `ActionLog` (снимок итогов на момент действия) и резервные копии `*.bak`.
-5. **Отсутствие строки не доказывает, что события не было.** Событие сна могло не записаться (Р5). Проверяется, пишет ли код эту строку на всех путях.
-6. **Вопрос «исправлено ли в версии X» решается по содержимому**: `git merge-base --is-ancestor <коммит фикса> <коммит версии>` и код в этой версии, не дата коммита.
-7. **Противоречие останавливает разбор.** Два источника расходятся: оба называются, расхождение проверяется третьим. Удобный источник не выбирается.
-8. **Отказ не скрывается.** Команда упала, нет доступа к базе, нет Windows или реального сна для проверки: это пишется явно, частичный результат помечается как частичный.
+## Data
 
-## Данные пользователя
+- User DB paths: `cs-guide`. Never write to it: close the app, copy the file outside the repo, open the copy with `sqlite3 -readonly`. Day queries: `sqlite`.
+- The JSON log export is not a DB backup (README).
 
-- База: `~/Library/Application Support/WorkTimeRegister/worktime.db` (macOS), `%LOCALAPPDATA%\WorkTimeRegister\worktime.db` (Windows), README. Рядом лежат резервные копии перед миграциями.
-- В базу пользователя ничего не пишется. Программа закрывается, файл копируется во временную папку вне репозитория, копия открывается `sqlite3 -readonly`. Запросы для разбора дня в `sqlite`.
-- Экспорт журнала в JSON не полная копия базы: импорт не восстанавливает периоды (README).
-- Запуск программы через `dotnet run` пишет в базу пользователя; для проверки запуском нужна копия репозитория с путём к временной базе (`cs-tests`).
+## Steps
 
-## Порядок
+1. Symptom: what the screen shows, which day, expected and shown numbers.
+2. App version, OS, machine time zone, `WorkDaySettings`.
+3. Rows of that day from the copy.
+4. Reproducing test, written in a repo copy in a temp folder; it enters the repo only with an agreed fix.
+5. Cause: `file:line` and how it produces the shown number.
+6. Proposed fix: file and method, why it removes the cause, what else it touches, which test turns green. Smallest option first. Code changes wait for the user's approval (AGENTS.md).
 
-1. Симптом словами пользователя: что видно на экране, какой день, какое число ожидалось и какое показано.
-2. Версия программы, ОС, часовой пояс машины, настройки дня (`WorkDaySettings`).
-3. Строки этого дня из копии базы: `WorkDays`, `TimeEntries`, `TimePauses`, `TimeTransfers`, `ActionLog`, `ApplicationState`.
-4. Воспроизведение тестом по `cs-tests` с теми же моментами, часовым поясом и настройками. Тест падает на текущем коде. Проверочный тест пишется в копии репозитория во временной папке, как в сессии 8; в репозиторий он попадает только вместе с фиксом, после согласования.
-5. Причина: `файл:строка` и как этот код получает показанное число.
-6. Фикс, по разделу ниже.
+## Output
 
-## Фикс предлагается, не делается
-
-- Причина без фикса означает незаконченный разбор. Фикс содержит: файл и метод, которые меняются; почему правка устраняет причину; что ещё она затрагивает; какой тест станет зелёным; что остаётся прежним.
-- Вариантов несколько: первым идёт самый маленький. Больший вариант называет, чего не хватает меньшему.
-- Код меняется после согласования плана с пользователем (`AGENTS.md`).
-
-## Результат
-
-- В чат: 2 предложения (что случилось и что с этим делать).
-- По `AGENTS.md` анализ ведётся в `ANALYSIS.md`. Перед записью новой сессии разбор спрашивает пользователя. Сессия содержит автора, дату, проверенный коммит, находки со следующими номерами `Р<n>` и их риск, проверки с командами и результатами, что не проверено. После записи в чат идёт ссылка на сессию.
-- Копии базы и проверочные проекты лежат во временной папке вне репозитория и удаляются после разбора.
+Two sentences in chat: what happened, what to do. Writing a session to `ANALYSIS.md`: ask first.

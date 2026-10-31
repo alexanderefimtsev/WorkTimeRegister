@@ -1,139 +1,96 @@
 ---
 name: cs-review
-description: "Ревью изменений WorkTimeRegister по двоичному чеклисту с нулём нарушений: объём, размер и повторы, время и часовые пояса, async и поток интерфейса, ошибки, SQL, безопасность, окна, тесты; нумерованный отчёт, исправления только по слову пользователя. Вызывается пользователем: $cs-review."
+description: "Review a WorkTimeRegister diff, branch or commit: AGENTS.md, C# (.NET 10, C# 14), Avalonia, Microsoft.Data.Sqlite, xUnit v3; numbered table report, fixes only on request. Invoke with $cs-review."
 ---
 
-# Ревью кода WorkTimeRegister
+# cs-review
 
-## Как проводить
+## Method
 
-- Ревью идёт в той сессии, где его вызвали, по объёму, который назвал пользователь: коммит, дифф, ветка или файлы. Сессия, в которой писался код, хуже видит свои нарушения; если ревью вызвано в ней, первая строка отчёта говорит об этом.
-- До чеклиста читаются `AGENTS.md` и сводка открытых находок в `ANALYSIS.md`. Для ревью достаточно чеклиста ниже. `cs-guide`, `sqlite` и `cs-tests` открываются, только если для решения по пункту нужны подробности.
-- Каждое правило двоичное: нарушено или нет. «Мелкое», «необязательное», «допустимо, раз так уже сделано» не бывает. Существующий код с тем же нарушением новое нарушение не оправдывает.
-- Решение по правилу принимается по коду и типам. Для правил о повторах и логике читаются соседние файлы и методы, которые правка вызывает.
-- Итог «ПРОЙДЕНО» только при нуле нарушений.
+- Scope: what the user named. Default: uncommitted changes (`git diff -U3 HEAD` plus untracked files). Branch: `git diff -U3 main...HEAD`.
+- Token budget: read the diff and only the methods it touches or calls. No repo scan, no subagents. Trim command output.
+- Run the commands first, then read.
+- Only added or changed lines count. Report violations only, nothing that is fine.
+- Each rule is violated or not; no severity. PASS means 0 violations.
+- Change nothing until the user names items ("fix 2 and 4"); then fix, rerun the commands, re-report with the same numbers.
+- Writing to `ANALYSIS.md`: ask first. Never commit or push.
 
-## Отчёт и исправления
+## Commands
 
-- Ревью проверяет и пишет отчёт в чат. Код, тесты и другие файлы оно не меняет. Для проверки пунктов чеклиста можно запустить `dotnet build` и `dotnet test`.
-- Исправляются только пункты, которые назвал пользователь («исправь 2 и 5»). После исправления запускаются `dotnet build` и `dotnet test` по `cs-tests`, и отчёт выводится заново с прежними номерами.
-- Нарушения в строках, которые правка не трогала, идут отдельным разделом отчёта. Их исправление требует отдельного разрешения: `AGENTS.md` запрещает широкие рефакторинги без него.
-- Изменение поведения ждёт подтверждения пользователя.
-- По `AGENTS.md` аудиты ведутся в `ANALYSIS.md`. Перед записью ревью чужого коммита или аудита новой сессией ревью спрашивает пользователя. Сессия содержит автора, дату, проверенный коммит и находки со следующими номерами `Р<n>`, как сессии 4 и 7.
-- Ревью ничего не коммитит и не публикует: коммит делается после того, как пользователь подтвердил сообщение (`AGENTS.md`).
-
-## Чеклист
-
-### Объём
-
-- [ ] Изменено только то, что требует задача. Публичные API, классы, методы, DTO и ключи конфигурации не переименованы без запроса (`AGENTS.md`).
-- [ ] Нет широкого рефакторинга, переформатирования чужих строк, новой зависимости, смены UI-фреймворка, версии .NET или Avalonia без разрешения.
-- [ ] Если изменено правило в `AGENTS.md`, `AGENTS.en.md` изменён так же.
-
-### Размер и повторы
-
-- [ ] Новая или изменённая функция не длиннее 100 строк. Функция, которая уже была длиннее, правкой не удлинилась.
-- [ ] Файл не длиннее 1200 строк.
-- [ ] Нет копии существующей логики: помощников SQL (`CreateSql`, `ExecuteSqlAsync`, `ScalarAsync`), `Format`, `Parse`, `ToSeconds`, `WorkDayService.Boundary`, расчётов `TimeSummaryCalculator` и `TimeTransferPlanner`, тестовых часов и контекстов.
-- [ ] Нет нового класса там, где тему ведёт существующий; нет обёртки из одного-двух методов вокруг существующего класса.
-- [ ] Нет мёртвого кода, неиспользуемых параметров и переменных, закомментированного кода.
-
-### Типы и null
-
-- [ ] Каждый `?`, `??`, `?.`, `!` и проверка на `null` оправданы значением, которое по типам и инвариантам может отсутствовать.
-- [ ] Нет `dynamic` и приведений типа, без которых код обходится.
-- [ ] Нет магических строк и чисел: константы с именем.
-
-### Время
-
-- [ ] В расчётах и правилах нет `DateTime.Now`, `DateTime.UtcNow`, `DateTimeOffset.Now`, `DateTimeOffset.UtcNow` и `TimeZoneInfo.Local`; время берётся из `TimeProvider`.
-- [ ] Нет неявного превращения `DateTime` в `DateTimeOffset`, в том числе `x.Date` там, где ждут `DateTimeOffset`.
-- [ ] Граница дня строится `WorkDayService.Boundary`; окна полуоткрытые, конец не входит.
-- [ ] Итоги верны для активного рабочего периода, активного перерыва, паузы, завершённых периодов, итога дня, полуночи (`AGENTS.md`).
-- [ ] Перевод часов назад, повтор и пропуск событий сна не дают отрицательных периодов и двойного учёта.
-
-### Асинхронность и поток интерфейса
-
-- [ ] `async void` только в обработчиках событий и в `AsyncCommand.Execute`.
-- [ ] Нет `.Result`, `.Wait()` и `GetAwaiter().GetResult()` вне `Program.Main`.
-- [ ] Колбэк платформы меняет состояние через `Dispatcher.UIThread`.
-- [ ] Состояние `MainWindowViewModel` меняется под `stateLock`.
-- [ ] После смены состояния доступность команд обновлена, кнопки и меню Dock не показывают прошлое состояние.
-- [ ] Подписки сняты, таймеры остановлены, подключения, команды и читатели освобождены через `using` или `await using`.
-
-### Ошибки
-
-- [ ] Нет нового `catch (Exception)`, кроме границы с пользователем и необязательных интеграций с предупреждением.
-- [ ] Нет пустого `catch` и `catch`, который только пишет в лог и бросает исключение дальше.
-- [ ] Нет логики по `exception.Message`, строкам ОС или тексту действия в журнале; решение по типу, коду, enum или полю.
-- [ ] Ошибка видна пользователю понятным текстом или уходит наверх; ошибка интерфейса не выдаётся за ошибку базы (Р2).
-- [ ] Выбрасывается исключение конкретного типа, не `Exception`.
-- [ ] Парные операции одинаково понимают успех: начало и конец паузы, сон и пробуждение, запуск и выход.
-
-### SQL и данные
-
-Подробные правила в `sqlite`.
-
-- [ ] Все значения идут параметрами; интерполяция в SQL только для констант.
-- [ ] Момент записан через `Format`, длительность через `ToSeconds`, дата как `"yyyy-MM-dd"`.
-- [ ] Фильтр стоит в `WHERE`; запрос по таймеру читает только окно дня.
-- [ ] Связанные записи идут в одной транзакции, данные для решения читаются в ней же.
-- [ ] Правило «одна активная запись» или «одна строка» держит индекс или `CHECK`.
-- [ ] Изменение схемы: новая `user_version`, резервная копия перед миграцией, маска копии в `.gitignore`, тест миграции.
-
-### Полнота параметров и состояния
-
-- [ ] Каждый принятый параметр используется: окно `from` и `to`, часовой пояс, настройки дня.
-- [ ] Итоги, журнал, иконка и меню Dock показывают одно состояние и один день.
-- [ ] Поведение верно для пустого дня, нулевой длительности и момента на конце окна.
-
-### Безопасность
-
-- [ ] Новый файл, каталог или канал доступен только текущему пользователю.
-- [ ] Файл от пользователя читается с ограничением размера и числа записей и с проверкой формата и версии, как `ActionLogJsonService`.
-- [ ] Путь из ввода пользователя не склеивается со служебным путём без проверки.
-- [ ] В репозитории нет секретов, сертификатов и ключей; `.gitignore` закрывает `*.pem`, `*.key`, `*.p12`, `*.pfx`, `.env`.
-- [ ] Установка, обновление и удаление программы не трогают базу пользователя.
-
-### Культура и тексты
-
-- [ ] Значения для базы и файлов форматируются и разбираются с `InvariantCulture` или явным форматом.
-- [ ] Тексты интерфейса по-русски, комментарии в коде по-английски, имена не переведены (`AGENTS.md`).
-- [ ] Пользователь видит время без долей секунды и без ISO-формата (Р4).
-
-### Окна
-
-- [ ] Новое окно или диалог написан в XAML, окно с ViewModel задаёт `x:DataType`; в code-behind нет правил учёта.
-- [ ] Сборка проходит без предупреждений привязок.
-
-### Тесты
-
-- [ ] Новое поведение покрыто тестом по `cs-tests`. Для исправленной ошибки есть тест, который падал до правки и проходит после.
-- [ ] Нет `Thread.Sleep`, нового `Task.Delay` и подмены внутренних классов.
-- [ ] `dotnet build WorkTimeRegister.slnx` даёт 0 предупреждений; число предупреждений с `-p:AnalysisLevel=latest-recommended` не выросло.
-
-## Отчёт
-
-Нумерация сквозная через все разделы. Номер пункта не меняется при повторном отчёте; новые находки получают следующие номера. Пользователь ссылается на пункты номерами: «исправь 2», «7 не проблема».
-
-```
-# Ревью: <коммит или дифф>
-
-## Нарушения в правке
-| # | Правило | Файл | Строки | Почему нарушено | Исправление |
-
-## Нарушения вне правки
-| # | Правило | Файл | Строки | Почему нарушено |
-
-## Изменения поведения (подтвердить)
-| # | Файл | Строки | Что было, что стало | Задумано? |
-
-## Проверки
-Точные команды и строки итога.
-
-## Итог
-- Нарушений в правке: N (номера)
-- Статус: ПРОЙДЕНО (0 нарушений) | ТРЕБУЕТ ИСПРАВЛЕНИЙ (N)
+```bash
+# 1 comments: the grep from "Rules from Yuri" in AGENTS.md
+# 2 analyzers on changed files
+{ git diff --name-only HEAD -- '*.cs'; git ls-files -o --exclude-standard -- '*.cs'; } > /tmp/wtr-changed.txt
+dotnet build WorkTimeRegister.slnx --no-incremental -p:AnalysisLevel=latest-recommended 2>&1 | grep -E 'warning (CA|CS|IDE|SYSLIB)' | grep -v CA1707 | grep -F -f /tmp/wtr-changed.txt | sed -E 's/ \[[^]]*\]$//; s#^/[^(]*/(src|tests|packaging)/#\1/#' | sort -u | cut -c1-160
+# 3 build and tests
+dotnet build WorkTimeRegister.slnx 2>&1 | tail -n 3
+dotnet test WorkTimeRegister.slnx -m:1 -nodeReuse:false 2>&1 | grep -E 'Passed!|Failed!'
 ```
 
-После исправлений таблица нарушений получает столбец «Исправлено» со значением «да» или с причиной, по которой пункт не исправлен. Итог: «Нарушений: N найдено, N исправлено».
+For a branch, replace `HEAD` with `main...HEAD` in step 2.
+
+## Rules
+
+Project (`AGENTS.md`):
+- [ ] No comment in added or changed lines (Rules from Yuri).
+- [ ] Only what the task needs: no broad refactoring, no renamed public APIs, classes, methods, DTOs, endpoints or config keys; behaviour outside the task unchanged.
+- [ ] UI framework unchanged; day totals and current period stay visible and updating.
+- [ ] Time math correct for active work, active break, completed periods, day totals.
+- [ ] SQLite stays local, no database server.
+- [ ] `AGENTS.md` changed: `AGENTS.en.md` matches.
+
+C# (.NET 10, C# 14):
+- [ ] 0 new analyzer warnings (command 2) and 0 new compiler warnings, nullable CS86xx included.
+- [ ] `!` only with a visible invariant; no `?.` or `??` on values that cannot be null.
+- [ ] `async void` only in event handlers and `AsyncCommand.Execute`; no `.Result`, `.Wait()`, `GetAwaiter().GetResult()` outside `Program.Main`.
+- [ ] Every created `IDisposable` is disposed with `using` or owned by a disposable type (CA2000, CA1001, CA2213).
+- [ ] No `catch (Exception)` except UI or optional-integration boundaries that show a message; no empty catch; no catch that only logs and rethrows (CA1031).
+- [ ] No logic on exception messages or other free text; decide on types, codes, enums.
+- [ ] Specific exception types; argument exceptions built correctly (CA2208).
+- [ ] Persisted and file data formatted and parsed with `CultureInfo.InvariantCulture` or an explicit format (CA1305); string comparisons pass `StringComparison` (CA1310).
+- [ ] Now from the injected `TimeProvider`; instants as `DateTimeOffset`; no implicit `DateTime` to `DateTimeOffset`; day windows via `WorkDayService.Boundary`, end exclusive.
+- [ ] New P/Invoke uses `[LibraryImport]` (SYSLIB1054).
+- [ ] No copy of existing logic: SQL helpers, `Format`, `Parse`, `ToSeconds`, calculators, `WorkDayService.Boundary`, test clocks.
+- [ ] Function at most 100 lines, file at most 1200; a longer function does not grow.
+- [ ] No dead code, unused parameters, magic strings or numbers.
+
+Avalonia 11.3:
+- [ ] View-model state changes on the UI thread (`Dispatcher.UIThread`) and under `stateLock`.
+- [ ] New windows in XAML with `x:DataType`; no tracking logic in code-behind.
+- [ ] Commands raise `CanExecuteChanged` after state changes.
+
+Microsoft.Data.Sqlite:
+- [ ] Values only as parameters.
+- [ ] Multi-row writes: one transaction and one reused parameterized command (Microsoft Learn, bulk insert).
+- [ ] Reads filter in `WHERE` and are bounded by a time window; no full-table read filtered in C#.
+- [ ] Instants via `Format` (UTC, `"O"`), durations via `ToSeconds`.
+- [ ] Connections, commands and readers disposed.
+- [ ] Schema change: new `user_version` block, backup before migration, migration test.
+- [ ] No heavy SQLite work on the UI thread: async methods run synchronously (Microsoft Learn, async limitations).
+
+Tests (xUnit v3):
+- [ ] Changed behaviour has a test; a fixed bug has a test that failed before the fix.
+- [ ] Real SQLite in a temp folder, `TimeProvider` subclass, explicit offsets, no mocks of project classes.
+- [ ] No `Thread.Sleep`; no `Task.Delay` waits except the existing `WaitForAsync` after `ICommand.Execute`.
+- [ ] Expected values are literals, not recomputed by the code under test.
+
+## Report
+
+```
+# Code Review: <scope>
+
+## Violations
+| # | Rule | File | Line(s) | Why it violates the rule | Fix |
+
+## Behaviour changes (confirm intent)
+| # | File | Line(s) | Before -> after | Intended? |
+
+## Checks run
+<command>: <result line>
+
+## Verdict
+- Violations: N (#...)
+- Status: PASS (0) | CHANGES REQUIRED (N)
+```
+
+One numbering across all sections. Numbers never change; new findings continue the sequence. After requested fixes, add a `Fixed` column and write "Violations: N found, N fixed".

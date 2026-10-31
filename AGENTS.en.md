@@ -9,6 +9,17 @@
   - elapsed working or break time for the currently active period.
 - Daily totals and the duration of the currently active period must remain visible and update promptly.
 
+# Rules from Yuri
+
+Added by Yuri. The repository owner may delete this whole section; the other rules stay unchanged.
+
+## ⛔ BLOCKING: no comments in code
+
+- Added or changed lines in `.cs`, `.axaml`, `.csproj`, `.slnx`, `.plist` and `scripts/` contain no comments: no `//`, `///`, `/* */`, `<!-- -->`, `#` (except `#!`), TODO or commented-out code. This overrides the comment-language item in the C# style section.
+- Only exception: the user explicitly asked for that exact comment in this conversation.
+- Explanations go to the reply, the commit message or `ANALYSIS.md`. Leave existing comments untouched.
+- Before reporting done, run `git diff -U0 HEAD -- src tests packaging scripts | grep -nE '^\+[^+].*(//|/\*|<!--)|^\+\s*#[^!]'` and search untracked new files the same way. URLs such as `https://` and `avares://` are not comments.
+
 # Working rules
 
 - Before changing code, inspect the related files and briefly explain the implementation plan to the user.

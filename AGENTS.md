@@ -9,6 +9,17 @@
   - прошедшее время работы или перерыва для текущего активного периода.
 - Итоговое время за день и длительность текущего активного периода должны отображаться постоянно и своевременно обновляться.
 
+# Rules from Yuri
+
+Added by Yuri. The repository owner may delete this whole section; the other rules stay unchanged.
+
+## ⛔ BLOCKING: no comments in code
+
+- Added or changed lines in `.cs`, `.axaml`, `.csproj`, `.slnx`, `.plist` and `scripts/` contain no comments: no `//`, `///`, `/* */`, `<!-- -->`, `#` (except `#!`), TODO or commented-out code. This overrides the comment-language item in the C# style section.
+- Only exception: the user explicitly asked for that exact comment in this conversation.
+- Explanations go to the reply, the commit message or `ANALYSIS.md`. Leave existing comments untouched.
+- Before reporting done, run `git diff -U0 HEAD -- src tests packaging scripts | grep -nE '^\+[^+].*(//|/\*|<!--)|^\+\s*#[^!]'` and search untracked new files the same way. URLs such as `https://` and `avares://` are not comments.
+
 # Правила работы
 
 - Перед изменением кода изучай связанные файлы и кратко объясняй пользователю план реализации.
