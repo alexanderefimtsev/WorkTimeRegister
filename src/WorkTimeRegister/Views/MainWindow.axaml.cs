@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using System.Reflection;
 using WorkTimeRegister.Models;
 using WorkTimeRegister.ViewModels;
 
@@ -30,6 +31,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var assembly = typeof(MainWindow).Assembly;
+        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion.Split('+')[0] ?? assembly.GetName().Version?.ToString(3) ?? "неизвестна";
+        Title = $"Учёт рабочего времени — версия {version}";
         Closing += MainWindowClosing;
     }
 
